@@ -19,6 +19,7 @@ from __future__ import annotations
 import numpy as np
 from ripser import ripser
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
+from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import FeatureUnion, Pipeline
 from typing import Literal
@@ -26,6 +27,17 @@ from typing import Literal
 from .data import normalize_cloud, to_fixed_size
 
 RngLike = int | np.random.Generator | None
+GudhiRepresentation = Literal[
+    "betti",
+    "landscape",
+    "image",
+    "silhouette",
+    "entropy",
+    "topological_vector",
+    "complex_polynomial",
+    "atol",
+    "persistence_lengths",
+]
 
 
 def _prepare_cloud(
@@ -82,6 +94,31 @@ class RipserFeatures(BaseEstimator, TransformerMixin):
             rng=self.random_state,
         )
         return feats
+
+
+class ComplexToReal(BaseEstimator, TransformerMixin):
+    """Convert complex-valued feature matrices to real-valued sklearn inputs."""
+
+    def fit(self, X, y=None):
+        self.fitted_ = True
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X)
+        if np.iscomplexobj(X):
+            return np.hstack([X.real, X.imag])
+        return X
+
+
+class FitMarker(BaseEstimator, TransformerMixin):
+    """No-op transformer that marks stateless GUDHI branches as fitted."""
+
+    def fit(self, X, y=None):
+        self.fitted_ = True
+        return self
+
+    def transform(self, X):
+        return X
 
 
 def cloud_diagrams(
@@ -251,12 +288,54 @@ def _gudhi_diagram_pipeline(
     *,
     n_points: int | None,
     homology_dimensions: tuple[int, ...],
+    representation: GudhiRepresentation,
     grid: int,
     n_estimators: int,
     random_state: int,
     n_jobs: int | None,
 ) -> Pipeline:
-    from gudhi.representations import BettiCurve, DiagramSelector, DimensionSelector
+    from gudhi.representations import (
+        Atol,
+        BettiCurve,
+        ComplexPolynomial,
+        DiagramSelector,
+        DimensionSelector,
+        Entropy,
+        Landscape,
+        PersistenceImage,
+        PersistenceLengths,
+        Silhouette,
+        TopologicalVector,
+    )
+
+    def vectorizer():
+        match representation:
+            case "betti":
+                return BettiCurve(resolution=grid)
+            case "landscape":
+                return Landscape(resolution=grid)
+            case "image":
+                return PersistenceImage(resolution=[grid, grid])
+            case "silhouette":
+                return Silhouette(resolution=grid)
+            case "entropy":
+                return Entropy(mode="vector", normalized=False, resolution=grid)
+            case "topological_vector":
+                return TopologicalVector(threshold=grid)
+            case "complex_polynomial":
+                return Pipeline(
+                    [
+                        ("polynomial", ComplexPolynomial(threshold=grid)),
+                        ("real", ComplexToReal()),
+                    ]
+                )
+            case "atol":
+                return Atol(
+                    quantiser=KMeans(n_clusters=grid, random_state=random_state, n_init=10)
+                )
+            case "persistence_lengths":
+                return PersistenceLengths(num_lengths=grid)
+        raise ValueError(f"Unknown GUDHI representation: {representation}")
 
     branches = []
     for index, dim in enumerate(homology_dimensions):
@@ -267,7 +346,8 @@ def _gudhi_diagram_pipeline(
                     [
                         ("select", DimensionSelector(index=index)),
                         ("finite", DiagramSelector(use=True, point_type="finite")),
-                        ("curve", BettiCurve(resolution=grid)),
+                        ("vector", vectorizer()),
+                        ("fit_marker", FitMarker()),
                     ]
                 ),
             )
@@ -298,6 +378,7 @@ def gudhi_betti_pipeline(
     n_points: int | None = None,
     homology_dimensions: tuple[int, ...] = (0, 1, 2),
     threshold: float = float("inf"),
+    representation: GudhiRepresentation = "betti",
     grid: int = 32,
     n_estimators: int = 300,
     random_state: int = 0,
@@ -314,6 +395,7 @@ def gudhi_betti_pipeline(
         ),
         n_points=n_points,
         homology_dimensions=homology_dimensions,
+        representation=representation,
         grid=grid,
         n_estimators=n_estimators,
         random_state=random_state,
@@ -327,6 +409,7 @@ def cech_betti_pipeline(
     homology_dimensions: tuple[int, ...] = (0, 1, 2),
     precision: Literal["fast", "safe", "exact"] = "safe",
     threshold: float = float("inf"),
+    representation: GudhiRepresentation = "betti",
     grid: int = 32,
     n_estimators: int = 300,
     random_state: int = 0,
@@ -344,6 +427,7 @@ def cech_betti_pipeline(
         ),
         n_points=n_points,
         homology_dimensions=homology_dimensions,
+        representation=representation,
         grid=grid,
         n_estimators=n_estimators,
         random_state=random_state,
