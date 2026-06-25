@@ -220,7 +220,14 @@ def test_run_benchmark_smoke():
     from tda_shapes.ml.benchmark import run_benchmark
 
     results = run_benchmark(
-        k=2, n_samples=20, density=12.0, epochs=2, n_points_ph=64, seed=0, verbose=False
+        k=2,
+        n_samples=20,
+        density=12.0,
+        epochs=2,
+        n_points_ph=64,
+        run_rips=True,
+        seed=0,
+        verbose=False,
     )
     assert set(results) == {
         "pointnet",
