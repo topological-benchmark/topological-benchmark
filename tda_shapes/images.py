@@ -117,6 +117,7 @@ def rasterize_kde(
             + point_norms[None, :]
             - 2.0 * chunk @ points.T
         )
+        np.maximum(dist2, 0.0, out=dist2)
         density[start : start + batch] = np.exp(-0.5 * dist2 / h2).sum(axis=1)
 
     image = density.reshape((resolution, resolution, resolution))
