@@ -24,8 +24,10 @@ def run_benchmark(
     density: float = 6.0,
     size_range: tuple[float, float] = (0.8, 1.3),
     noise: float = 0.02,
+    background_density: float = 0.0,
+    background_margin: float = 0.0,
     n_points_net: int = 256,
-    n_points_ph: int | None = None,
+    n_points_ph: int | None = 256,
     epochs: int = 80,
     test_frac: float = 0.3,
     seed: int = 0,
@@ -36,9 +38,9 @@ def run_benchmark(
     Returns ``{method_name: betti_metrics(...)}`` for ``pointnet``,
     ``gudhi_rips``, ``gudhi_cech``, ``ripser_learned`` and ``ripser_direct``.
 
-    ``n_points_ph=None`` runs persistent homology on the **full** cloud (no
-    subsampling). Because Rips-H2 is O(N^3), the default ``density``/``size_range``
-    are kept low so even the largest cloud stays tractable.
+    ``n_points_ph`` subsamples each cloud before persistent homology (default
+    256); pass ``None`` to run on the **full** cloud. Because Rips-H2 is O(N^3),
+    subsampling keeps even the largest cloud tractable.
     """
     # Imported here so the heavy deps load only when the benchmark runs.
     from .ph import (
@@ -61,6 +63,8 @@ def run_benchmark(
         density=density,
         size_range=size_range,
         noise=noise,
+        background_density=background_density,
+        background_margin=background_margin,
         embed_dim=3,
         rng=rng,
     )
@@ -159,12 +163,26 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--smin", type=float, default=0.8, help="min shape size")
     parser.add_argument("--smax", type=float, default=1.3, help="max shape size")
     parser.add_argument("--noise", type=float, default=0.02)
+    parser.add_argument(
+        "--background-density",
+        type=float,
+        default=0.0,
+        dest="background_density",
+        help="volumetric density of uniform background clutter; 0 = none",
+    )
+    parser.add_argument(
+        "--background-margin",
+        type=float,
+        default=0.0,
+        dest="background_margin",
+        help="fractional padding of the background box beyond the shapes",
+    )
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--points-net", type=int, default=256, dest="n_points_net")
     parser.add_argument(
         "--points-ph",
         type=int,
-        default=0,
+        default=256,
         dest="n_points_ph",
         help="subsample size for persistent homology; 0 = use the full cloud",
     )
@@ -178,6 +196,8 @@ def main(argv: list[str] | None = None) -> None:
         density=args.density,
         size_range=(args.smin, args.smax),
         noise=args.noise,
+        background_density=args.background_density,
+        background_margin=args.background_margin,
         n_points_net=args.n_points_net,
         n_points_ph=args.n_points_ph or None,  # 0 -> None (no subsampling)
         epochs=args.epochs,

@@ -63,7 +63,7 @@ def plot_cloud(
     # tab10 color scale clean for the real components.
     bg_mask = labels == BACKGROUND_LABEL if labels is not None else None
     if bg_mask is not None and bg_mask.any():
-        bg_kw = {**kw, "c": "0.7", "s": max(kw["s"] * 0.5, 1), "alpha": 0.25}
+        bg_kw = {**kw, "c": "0.7", "s": max(kw["s"] * 0.5, 1), "alpha": 0.4}
         ax.scatter(*[pts[bg_mask, i] for i in range(dim)], **bg_kw)
         fg = ~bg_mask
         pts, labels = pts[fg], labels[fg]
