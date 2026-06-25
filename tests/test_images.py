@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 
@@ -65,6 +67,24 @@ def test_bandwidth_pixel_compatibility_rejects_aliasing():
     points = Circle().sample(density=80.0, size=1.0, embed_dim=3, rng=3)
     with pytest.raises(ValueError, match="bandwidth too small"):
         rasterize_kde(points, resolution=16, bandwidth=0.01)
+
+
+def test_rasterize_rejects_unknown_backend():
+    points = Circle().sample(density=80.0, size=1.0, embed_dim=3, rng=3)
+    with pytest.raises(ValueError, match="unknown image backend"):
+        rasterize_kde(points, resolution=16, bandwidth=0.25, backend=cast(Any, "bogus"))
+
+
+def test_rasterize_mps_matches_numpy_when_available():
+    jax = pytest.importorskip("jax")
+    try:
+        jax.devices("mps")
+    except RuntimeError:
+        pytest.skip("JAX MPS backend unavailable")
+    points = Circle().sample(density=40.0, size=1.0, embed_dim=3, rng=4)
+    numpy_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend="numpy")
+    mps_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend="mps")
+    assert np.max(np.abs(numpy_image - mps_image)) < 1e-4
 
 
 def test_default_relative_bandwidth_has_cubical_h1_signal():

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
 from .noise import PointNoiseKind
 from .shapes import DEFAULT_SHAPES, RngLike, Shape
+
+ImageBackend = Literal["numpy", "jax", "mps"]
+_JAX_DENSITY_CHUNK = None
 
 
 @dataclass
@@ -70,6 +74,7 @@ def rasterize_kde(
     min_pixels_per_bandwidth: float = 1.0,
     normalize: bool = True,
     filtration: bool = True,
+    backend: ImageBackend = "numpy",
 ) -> np.ndarray:
     """Rasterize ``points`` to a cubic Gaussian-KDE image.
 
@@ -104,8 +109,30 @@ def rasterize_kde(
             f"bandwidth={bandwidth:.6g}, pixel_size={pixel_size:.6g}"
         )
 
+    if backend == "numpy":
+        density = _kde_density_numpy(points, center, radius, resolution, bandwidth)
+    elif backend in {"jax", "mps"}:
+        density = _kde_density_jax(points, center, radius, resolution, bandwidth, backend)
+    else:
+        raise ValueError(f"unknown image backend: {backend!r}")
+
+    image = density.reshape((resolution, resolution, resolution))
+    if normalize and image.max() > 0:
+        image = image / image.max()
+    if filtration:
+        image = image.max() - image
+    return image.astype(np.float32, copy=False)
+
+
+def _kde_grid(center: np.ndarray, radius: float, resolution: int) -> np.ndarray:
     axes = [np.linspace(c - radius, c + radius, resolution) for c in center]
-    grid = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
+    return np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
+
+
+def _kde_density_numpy(
+    points: np.ndarray, center: np.ndarray, radius: float, resolution: int, bandwidth: float
+) -> np.ndarray:
+    grid = _kde_grid(center, radius, resolution)
     density = np.empty(len(grid), dtype=float)
     point_norms = np.sum(points**2, axis=1)
     h2 = bandwidth * bandwidth
@@ -119,13 +146,55 @@ def rasterize_kde(
         )
         np.maximum(dist2, 0.0, out=dist2)
         density[start : start + batch] = np.exp(-0.5 * dist2 / h2).sum(axis=1)
+    return density
 
-    image = density.reshape((resolution, resolution, resolution))
-    if normalize and image.max() > 0:
-        image = image / image.max()
-    if filtration:
-        image = image.max() - image
-    return image.astype(np.float32, copy=False)
+
+def _kde_density_jax(
+    points: np.ndarray,
+    center: np.ndarray,
+    radius: float,
+    resolution: int,
+    bandwidth: float,
+    backend: ImageBackend,
+) -> np.ndarray:
+    try:
+        import jax
+    except ImportError as exc:
+        raise ImportError("backend='jax'/'mps' requires jax in the active environment") from exc
+
+    devices = jax.devices("mps") if backend == "mps" else jax.devices()
+    if not devices:
+        raise RuntimeError(f"no JAX devices for backend={backend!r}")
+    device = devices[0]
+
+    global _JAX_DENSITY_CHUNK
+    if _JAX_DENSITY_CHUNK is None:
+        _JAX_DENSITY_CHUNK = jax.jit(_kde_density_chunk_jax)
+
+    grid = _kde_grid(center, radius, resolution).astype(np.float32, copy=False)
+    pts = jax.device_put(np.asarray(points, dtype=np.float32), device)
+    point_norms = jax.device_put(np.sum(np.asarray(points, dtype=np.float32) ** 2, axis=1), device)
+    h2 = jax.device_put(np.float32(bandwidth * bandwidth), device)
+    density = np.empty(len(grid), dtype=np.float32)
+    batch = max(1, min(8192, 2_000_000 // len(points)))
+    for start in range(0, len(grid), batch):
+        chunk = jax.device_put(grid[start : start + batch], device)
+        density[start : start + batch] = np.asarray(
+            _JAX_DENSITY_CHUNK(chunk, pts, point_norms, h2)
+        )
+    return density
+
+
+def _kde_density_chunk_jax(chunk, pts, point_norms, h2):
+    import jax.numpy as jnp
+
+    dist2 = (
+        jnp.sum(chunk**2, axis=1)[:, None]
+        + point_norms[None, :]
+        - 2.0 * chunk @ pts.T
+    )
+    dist2 = jnp.maximum(dist2, 0.0)
+    return jnp.exp(-0.5 * dist2 / h2).sum(axis=1)
 
 
 def make_image_dataset(
@@ -144,6 +213,7 @@ def make_image_dataset(
     field_length_scale: float = 0.25,
     stretch_range: tuple[float, float] | None = None,
     keep_clouds: bool = False,
+    backend: ImageBackend = "numpy",
     rng: RngLike = None,
 ) -> ImageDataset:
     """Generate an image dataset by sampling shapes then KDE-rasterizing them.
@@ -187,6 +257,7 @@ def make_image_dataset(
                 bandwidth=bandwidth * size,
                 padding=padding,
                 min_pixels_per_bandwidth=min_pixels_per_bandwidth,
+                backend=backend,
             )
             images.append(image)
             if keep_clouds:
