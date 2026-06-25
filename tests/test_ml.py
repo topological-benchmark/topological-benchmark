@@ -106,6 +106,43 @@ def test_gudhi_pipeline_fits_point_clouds():
     assert pred.dtype.kind == "i"
 
 
+@pytest.mark.parametrize(
+    "representation",
+    [
+        "betti",
+        "landscape",
+        "image",
+        "silhouette",
+        "entropy",
+        "topological_vector",
+        "complex_polynomial",
+        "atol",
+        "persistence_lengths",
+    ],
+)
+def test_gudhi_pipeline_representations_fit(representation):
+    pytest.importorskip("gudhi")
+    from tda_shapes.ml.ph import gudhi_betti_pipeline
+
+    rng = np.random.default_rng(0)
+    clouds = [
+        Circle().sample(density=20, size=1.0, embed_dim=3, rng=rng),
+        Annulus().sample(density=20, size=1.0, embed_dim=3, rng=rng),
+        Disk().sample(density=20, size=1.0, embed_dim=3, rng=rng),
+    ]
+    y = np.array([(1, 1, 0), (1, 1, 0), (1, 0, 0)])
+    model = gudhi_betti_pipeline(
+        n_points=24,
+        homology_dimensions=(0, 1),
+        representation=representation,
+        grid=2,
+        n_estimators=2,
+        random_state=0,
+    )
+    pred = model.fit(clouds, y).predict(clouds)
+    assert pred.shape == y.shape
+
+
 def test_cech_pipeline_fits_point_clouds():
     pytest.importorskip("gudhi")
     from tda_shapes.ml.ph import cech_betti_pipeline
