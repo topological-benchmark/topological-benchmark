@@ -33,7 +33,7 @@ The following geometric and sampling parameters can be varied:
 - Sampling density
 - Separation or minimal distance between objects
 - Thickening
-- Noise, either on individual shapes or globally
+- Noise: iid point noise plus smooth random vector-field displacement, both scaled by object size
 - Sampling texture, meaning introducing non-uniform density along the shape
 
 
