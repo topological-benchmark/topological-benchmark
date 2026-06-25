@@ -5,9 +5,9 @@ that their *clean* (noiseless) bounding balls do not overlap. Because the parts
 are disjoint, the union's homology is the direct sum of the parts, so the
 **combined Betti numbers are the element-wise sum** of the components'. Every
 component is sampled at the same ``density``, so the whole scene stays uniform.
-Packing uses each component's noiseless bounding radius; isotropic noise
-(Gaussian or uniform) is added only *after* placement, so the spacing is not inflated to
-accommodate the noise tail (a few boundary points may cross the gap).
+Packing uses each component's clean bounding radius; point/field noise is added
+only *after* placement, so spacing is not inflated to accommodate the noise tail
+(a few boundary points may cross the gap).
 
 Optionally, uniform background clutter can be scattered across the scene's
 bounding box at a fixed volumetric density (``background_density`` > 0, in points
@@ -20,13 +20,11 @@ polluting the cloud.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 
+from .noise import PointNoiseKind, apply_noise
 from .shapes import DEFAULT_SHAPES, RngLike, Shape
-
-NoiseKind = Literal["gaussian", "uniform"]
 
 #: ``component_labels`` value marking uniformly-sampled background clutter
 #: (points that belong to no shape).
@@ -65,26 +63,6 @@ def _uniform_background(
     if volume <= 0 or count <= 0:
         return np.empty((0, points.shape[1]))
     return rng.uniform(lo, hi, size=(count, points.shape[1]))
-
-
-def _add_noise(
-    points: np.ndarray, noise: float, kind: NoiseKind, rng: np.random.Generator
-) -> np.ndarray:
-    """Perturb ``points`` by isotropic noise of standard deviation ``noise``.
-
-    ``"gaussian"`` draws each coordinate from ``N(0, noise**2)``. ``"uniform"``
-    draws from ``U(-b, b)`` with ``b = noise * sqrt(3)`` so that both kinds share
-    the same per-axis standard deviation (``noise``), keeping the parameter's
-    meaning consistent across distributions.
-    """
-    if not noise:
-        return points
-    if kind == "gaussian":
-        return points + noise * rng.standard_normal(points.shape)
-    if kind == "uniform":
-        b = noise * np.sqrt(3.0)
-        return points + rng.uniform(-b, b, size=points.shape)
-    raise ValueError(f"unknown noise kind: {kind!r}")
 
 
 @dataclass
@@ -185,8 +163,10 @@ def sample_composite(
     *,
     density: float,
     size_range: tuple[float, float] = (1.0, 3.0),
-    noise: float = 0.0,
-    noise_kind: NoiseKind = "gaussian",
+    point_noise: float = 0.0,
+    point_noise_kind: PointNoiseKind = "gaussian",
+    field_noise: float = 0.0,
+    field_length_scale: float = 0.25,
     background_density: float = 0.0,
     background_margin: float = 0.0,
     embed_dim: int = 3,
@@ -206,11 +186,15 @@ def sample_composite(
         Points per unit intrinsic measure, constant across all components.
     size_range:
         Per-component size is drawn uniformly from this range.
-    noise:
-        Std. dev. of isotropic noise added after placement.
-    noise_kind:
-        Distribution of the post-placement noise: ``"gaussian"`` (default) or
-        ``"uniform"``. Both have per-axis standard deviation ``noise``.
+    point_noise:
+        Per-axis iid noise standard deviation, relative to each component size.
+    point_noise_kind:
+        ``"gaussian"`` or ``"uniform"`` iid point noise.
+    field_noise:
+        Smooth random vector-field displacement standard deviation, relative to
+        each component size.
+    field_length_scale:
+        Smooth field correlation length, relative to each component size.
     background_density:
         Volumetric density of uniform background clutter, in points per unit
         ambient (``embed_dim``-dimensional) volume. The clutter fills the scene's
@@ -242,13 +226,15 @@ def sample_composite(
     indices = rng.integers(0, len(pool), size=k)
     clouds: list[np.ndarray] = []
     radii = np.empty(k)
+    sizes = np.empty(k)
     betti = np.zeros(3, dtype=int)
 
     for j, idx in enumerate(indices):
         shape = pool[idx]
         size = rng.uniform(*size_range)
+        sizes[j] = size
         pts = shape.sample(
-            density=density, size=size, noise=0.0, embed_dim=embed_dim, rng=rng
+            density=density, size=size, point_noise=0.0, embed_dim=embed_dim, rng=rng
         )
         if rotate:
             pts = pts @ _random_rotation(embed_dim, rng).T
@@ -257,13 +243,23 @@ def sample_composite(
         betti += np.asarray(shape.betti, dtype=int)
 
     centers = _pack_centers(radii, clearance, embed_dim, rng)
+    perturbed = [
+        apply_noise(
+            c + centers[j],
+            scale=sizes[j],
+            rng=rng,
+            point_noise=point_noise,
+            point_noise_kind=point_noise_kind,
+            field_noise=field_noise,
+            field_length_scale=field_length_scale,
+        )
+        for j, c in enumerate(clouds)
+    ]
 
-    points = np.vstack([c + centers[j] for j, c in enumerate(clouds)])
+    points = np.vstack(perturbed)
     component_labels = np.concatenate(
         [np.full(len(c), indices[j], dtype=int) for j, c in enumerate(clouds)]
     )
-    points = _add_noise(points, noise, noise_kind, rng)
-
     if background_density > 0:
         bg = _uniform_background(points, background_density, rng, margin=background_margin)
         if len(bg):
@@ -340,8 +336,10 @@ def make_composite_dataset(
     *,
     density: float = 20.0,
     size_range: tuple[float, float] = (1.0, 3.0),
-    noise: float = 0.02,
-    noise_kind: NoiseKind = "gaussian",
+    point_noise: float = 0.02,
+    point_noise_kind: PointNoiseKind = "gaussian",
+    field_noise: float = 0.0,
+    field_length_scale: float = 0.25,
     background_density: float = 0.0,
     background_margin: float = 0.0,
     embed_dim: int = 3,
@@ -368,8 +366,10 @@ def make_composite_dataset(
             pool,
             density=density,
             size_range=size_range,
-            noise=noise,
-            noise_kind=noise_kind,
+            point_noise=point_noise,
+            point_noise_kind=point_noise_kind,
+            field_noise=field_noise,
+            field_length_scale=field_length_scale,
             background_density=background_density,
             background_margin=background_margin,
             embed_dim=embed_dim,

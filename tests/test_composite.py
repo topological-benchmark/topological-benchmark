@@ -60,7 +60,7 @@ def test_constant_density_carries_through():
     # (the union neither adds nor drops points).
     circle = Circle()
     scene = sample_composite(
-        1, [circle], density=DENSITY, size_range=(2.0, 2.0), noise=0.0, rng=4
+        1, [circle], density=DENSITY, size_range=(2.0, 2.0), point_noise=0.0, rng=4
     )
     assert len(scene.points) == circle.expected_n(DENSITY, 2.0)
 
@@ -73,7 +73,7 @@ def test_components_are_disjoint_when_clean():
     pool = [Disk(), Sphere(), Torus(), TwoCircles()]
     clearance = 0.5
     scene = sample_composite(
-        4, pool, density=DENSITY, noise=0.0, clearance=clearance, rotate=False, rng=5
+        4, pool, density=DENSITY, point_noise=0.0, clearance=clearance, rotate=False, rng=5
     )
     pts, lab = scene.points, scene.component_labels
     # component_labels are shape-type ids, so same-type components merge into one
@@ -105,7 +105,7 @@ def test_pack_centers_line_fallback_non_overlapping():
 
 
 def test_large_k_packs():
-    scene = sample_composite(15, density=30.0, noise=0.0, rng=7)
+    scene = sample_composite(15, density=30.0, point_noise=0.0, rng=7)
     assert scene.counts.sum() == 15
     assert scene.points.shape[1] == 3
 
@@ -117,8 +117,8 @@ def test_component_labels_cover_all_points():
 
 
 def test_reproducible():
-    a = sample_composite(4, density=DENSITY, noise=0.03, rng=42)
-    b = sample_composite(4, density=DENSITY, noise=0.03, rng=42)
+    a = sample_composite(4, density=DENSITY, point_noise=0.03, rng=42)
+    b = sample_composite(4, density=DENSITY, point_noise=0.03, rng=42)
     assert np.array_equal(a.points, b.points)
     assert np.array_equal(a.betti, b.betti)
 
@@ -140,7 +140,7 @@ def test_background_default_adds_no_clutter():
 def test_background_count_matches_density_times_volume():
     bg_density = 1.5
     scene = sample_composite(
-        3, density=DENSITY, noise=0.02, background_density=bg_density, rng=12
+        3, density=DENSITY, point_noise=0.02, background_density=bg_density, rng=12
     )
     fg = scene.points[scene.component_labels != BACKGROUND_LABEL]
     n_bg = int((scene.component_labels == BACKGROUND_LABEL).sum())
@@ -152,7 +152,7 @@ def test_background_margin_enlarges_box_and_count():
     scene = sample_composite(
         3,
         density=DENSITY,
-        noise=0.02,
+        point_noise=0.02,
         background_density=bg_density,
         background_margin=0.2,
         rng=12,
@@ -167,7 +167,7 @@ def test_background_lies_within_padded_box():
     scene = sample_composite(
         3,
         density=DENSITY,
-        noise=0.02,
+        point_noise=0.02,
         background_density=2.0,
         background_margin=margin,
         rng=13,
@@ -184,9 +184,9 @@ def test_background_lies_within_padded_box():
 def test_background_leaves_shapes_and_labels_unchanged():
     # Same seed, with and without clutter: the shape points and labels are
     # identical and the clutter is appended (it is sampled last).
-    clean = sample_composite(3, density=DENSITY, noise=0.02, rng=14)
+    clean = sample_composite(3, density=DENSITY, point_noise=0.02, rng=14)
     cluttered = sample_composite(
-        3, density=DENSITY, noise=0.02, background_density=2.0, rng=14
+        3, density=DENSITY, point_noise=0.02, background_density=2.0, rng=14
     )
     fg = cluttered.component_labels != BACKGROUND_LABEL
     assert np.array_equal(clean.betti, cluttered.betti)
@@ -196,8 +196,8 @@ def test_background_leaves_shapes_and_labels_unchanged():
 
 
 def test_background_reproducible():
-    a = sample_composite(3, density=DENSITY, noise=0.02, background_density=2.0, rng=15)
-    b = sample_composite(3, density=DENSITY, noise=0.02, background_density=2.0, rng=15)
+    a = sample_composite(3, density=DENSITY, point_noise=0.02, background_density=2.0, rng=15)
+    b = sample_composite(3, density=DENSITY, point_noise=0.02, background_density=2.0, rng=15)
     assert np.array_equal(a.points, b.points)
     assert np.array_equal(a.component_labels, b.component_labels)
 

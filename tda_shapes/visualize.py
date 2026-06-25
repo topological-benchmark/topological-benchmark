@@ -90,7 +90,9 @@ def gallery(
     *,
     density: float = 30.0,
     size: float = 1.5,
-    noise: float = 0.02,
+    point_noise: float = 0.02,
+    field_noise: float = 0.0,
+    field_length_scale: float = 0.25,
     stretch: StretchLike = None,
     embed_dim: int | None = 3,
     ncols: int = 4,
@@ -121,7 +123,9 @@ def gallery(
         pts = shape.sample(
             density=density,
             size=size,
-            noise=noise,
+            point_noise=point_noise,
+            field_noise=field_noise,
+            field_length_scale=field_length_scale,
             stretch=shp,
             embed_dim=embed_dim,
             rng=rng,
@@ -140,7 +144,9 @@ def composite_gallery(
     *,
     density: float = 30.0,
     size_range: tuple[float, float] = (1.0, 2.0),
-    noise: float = 0.02,
+    point_noise: float = 0.02,
+    field_noise: float = 0.0,
+    field_length_scale: float = 0.25,
     background_density: float = 0.0,
     background_margin: float = 0.0,
     clearance: float = 0.5,
@@ -167,7 +173,9 @@ def composite_gallery(
             pool,
             density=density,
             size_range=size_range,
-            noise=noise,
+            point_noise=point_noise,
+            field_noise=field_noise,
+            field_length_scale=field_length_scale,
             background_density=background_density,
             background_margin=background_margin,
             clearance=clearance,
@@ -198,7 +206,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Visualize TDA shape point clouds.")
     parser.add_argument("--density", type=float, default=30.0)
     parser.add_argument("--size", type=float, default=1.5)
-    parser.add_argument("--noise", type=float, default=0.02)
+    parser.add_argument("--point-noise", type=float, default=0.02)
+    parser.add_argument("--field-noise", type=float, default=0.0)
+    parser.add_argument("--field-length-scale", type=float, default=0.25)
     parser.add_argument(
         "--stretch",
         type=str,
@@ -235,7 +245,9 @@ def main(argv: list[str] | None = None) -> None:
         fig = composite_gallery(
             args.composite,
             density=args.density,
-            noise=args.noise,
+            point_noise=args.point_noise,
+            field_noise=args.field_noise,
+            field_length_scale=args.field_length_scale,
             background_density=args.background,
             rng=args.seed,
         )
@@ -243,7 +255,9 @@ def main(argv: list[str] | None = None) -> None:
         fig = gallery(
             density=args.density,
             size=args.size,
-            noise=args.noise,
+            point_noise=args.point_noise,
+            field_noise=args.field_noise,
+            field_length_scale=args.field_length_scale,
             stretch=_parse_stretch(args.stretch),
             rng=args.seed,
         )

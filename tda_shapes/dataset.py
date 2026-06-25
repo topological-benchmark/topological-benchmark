@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .noise import PointNoiseKind
 from .shapes import DEFAULT_SHAPES, RngLike, Shape
 
 
@@ -68,7 +69,10 @@ def make_dataset(
     n_per_class: int = 50,
     density: float = 20.0,
     size_range: tuple[float, float] = (1.0, 3.0),
-    noise: float = 0.02,
+    point_noise: float = 0.02,
+    point_noise_kind: PointNoiseKind = "gaussian",
+    field_noise: float = 0.0,
+    field_length_scale: float = 0.25,
     embed_dim: int | None = 3,
     stretch_range: tuple[float, float] | None = None,
     rng: RngLike = None,
@@ -88,8 +92,15 @@ def make_dataset(
     size_range:
         Range ``(lo, hi)`` from which each cloud's size is drawn uniformly.
         Varying the size is what makes point counts vary at fixed density.
-    noise:
-        Standard deviation of ambient isotropic Gaussian noise.
+    point_noise:
+        Per-axis iid noise standard deviation, relative to shape size.
+    point_noise_kind:
+        ``"gaussian"`` or ``"uniform"`` iid point noise.
+    field_noise:
+        Smooth random vector-field displacement standard deviation, relative to
+        shape size.
+    field_length_scale:
+        Smooth field correlation length, relative to shape size.
     embed_dim:
         Common ambient dimension to embed every cloud into (default 3, so all
         clouds share R^3). Pass ``None`` to keep native dimensions.
@@ -121,7 +132,10 @@ def make_dataset(
             cloud = shape.sample(
                 density=density,
                 size=size,
-                noise=noise,
+                point_noise=point_noise,
+                point_noise_kind=point_noise_kind,
+                field_noise=field_noise,
+                field_length_scale=field_length_scale,
                 rng=rng,
                 embed_dim=embed_dim,
                 stretch=stretch,

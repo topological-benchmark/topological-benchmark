@@ -14,8 +14,7 @@ the point count is controlled purely by ``size``::
     N = density * unit_measure * size ** intrinsic_dim
 
 Scaling a circle by 2 doubles its points; scaling a sphere by 2 quadruples
-them. Isotropic Gaussian noise of standard deviation ``noise`` is added in the
-ambient space after scaling.
+them. Point and field noise amplitudes are relative to object scale.
 """
 
 from __future__ import annotations
@@ -25,6 +24,8 @@ from dataclasses import dataclass
 from math import pi
 
 import numpy as np
+
+from .noise import PointNoiseKind, apply_noise
 
 Betti = tuple[int, int, int]
 RngLike = int | np.random.Generator | None
@@ -89,7 +90,10 @@ class Shape(ABC):
         *,
         density: float,
         size: float = 1.0,
-        noise: float = 0.0,
+        point_noise: float = 0.0,
+        point_noise_kind: PointNoiseKind = "gaussian",
+        field_noise: float = 0.0,
+        field_length_scale: float = 0.25,
         rng: RngLike = None,
         embed_dim: int | None = None,
         stretch: StretchLike = None,
@@ -104,9 +108,15 @@ class Shape(ABC):
             constant-density knob.
         size:
             Linear scale of the shape; controls the point count.
-        noise:
-            Standard deviation of isotropic Gaussian noise added in ambient
-            space after scaling.
+        point_noise:
+            Per-axis iid noise standard deviation, relative to object scale.
+        point_noise_kind:
+            ``"gaussian"`` or ``"uniform"`` iid point noise.
+        field_noise:
+            Smooth random vector-field displacement standard deviation,
+            relative to object scale.
+        field_length_scale:
+            Smooth field correlation length, relative to object scale.
         rng:
             Seed or :class:`numpy.random.Generator`.
         embed_dim:
@@ -123,16 +133,24 @@ class Shape(ABC):
         rng = np.random.default_rng(rng)
         if stretch is None:
             pts = self._sample_unit(self.expected_n(density, size), rng) * size
+            noise_scale = size
         else:
             scale = size * np.broadcast_to(
                 np.asarray(stretch, dtype=float), (self.native_dim,)
             )
             pts = self._sample_anisotropic(density, scale, rng)
+            noise_scale = float(np.max(np.abs(scale)))
         if embed_dim is not None:
             pts = _embed(pts, embed_dim)
-        if noise:
-            pts = pts + noise * rng.standard_normal(pts.shape)
-        return pts
+        return apply_noise(
+            pts,
+            scale=noise_scale,
+            rng=rng,
+            point_noise=point_noise,
+            point_noise_kind=point_noise_kind,
+            field_noise=field_noise,
+            field_length_scale=field_length_scale,
+        )
 
     def _sample_anisotropic(
         self, density: float, scale: np.ndarray, rng: np.random.Generator

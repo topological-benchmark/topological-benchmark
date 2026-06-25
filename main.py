@@ -36,12 +36,12 @@ def main() -> None:
     # Anisotropic stretch keeps density constant on the stretched object.
     from tda_shapes import Sphere
 
-    ell = Sphere().sample(density=DENSITY, size=1.5, noise=0.0, stretch=(1, 1, 2), rng=rng)
+    ell = Sphere().sample(density=DENSITY, size=1.5, point_noise=0.0, stretch=(1, 1, 2), rng=rng)
     print(f"\nSphere stretched to an ellipsoid (1,1,2): {len(ell)} points, uniform by area.")
 
     # Build, save, and reload a dataset (with random anisotropy for variety).
     ds = make_dataset(
-        n_per_class=10, density=DENSITY, noise=0.02, stretch_range=(0.7, 1.5), rng=rng
+        n_per_class=10, density=DENSITY, point_noise=0.02, stretch_range=(0.7, 1.5), rng=rng
     )
     print(f"\nGenerated {len(ds)} point clouds across {len(ds.label_names)} classes.")
     sizes = [c.shape[0] for c in ds.clouds]
@@ -57,7 +57,7 @@ def main() -> None:
 
     # Composite scenes: k disjoint shapes -> Betti numbers add up.
     k = 3
-    scene = sample_composite(k, density=DENSITY, noise=0.02, rng=rng)
+    scene = sample_composite(k, density=DENSITY, point_noise=0.02, rng=rng)
     present = ", ".join(
         f"{n}x {scene.shape_names[i]}"
         for i, n in enumerate(scene.counts)
@@ -68,7 +68,7 @@ def main() -> None:
         f"combined betti={tuple(int(x) for x in scene.betti)}, {len(scene.points)} points."
     )
 
-    cds = make_composite_dataset(30, k=k, density=DENSITY, noise=0.02, rng=rng)
+    cds = make_composite_dataset(30, k=k, density=DENSITY, point_noise=0.02, rng=rng)
     print(f"Generated {len(cds)} composite clouds; betti rows e.g. {cds.betti[:3].tolist()}")
     cds.save(COMPOSITE_PATH)
     rc = CompositeDataset.load(COMPOSITE_PATH)

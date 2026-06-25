@@ -23,9 +23,11 @@ def run_benchmark(
     n_samples: int = 600,
     density: float = 6.0,
     size_range: tuple[float, float] = (0.8, 1.3),
-    noise: float = 0.02,
     background_density: float = 0.0,
     background_margin: float = 0.0,
+    point_noise: float = 0.02,
+    field_noise: float = 0.0,
+    field_length_scale: float = 0.25,
     n_points_net: int = 256,
     n_points_ph: int | None = 256,
     run_rips: bool = False,
@@ -58,7 +60,9 @@ def run_benchmark(
         k=k,
         density=density,
         size_range=size_range,
-        noise=noise,
+        point_noise=point_noise,
+        field_noise=field_noise,
+        field_length_scale=field_length_scale,
         background_density=background_density,
         background_margin=background_margin,
         embed_dim=3,
@@ -171,7 +175,6 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--density", type=float, default=6.0)
     parser.add_argument("--smin", type=float, default=0.8, help="min shape size")
     parser.add_argument("--smax", type=float, default=1.3, help="max shape size")
-    parser.add_argument("--noise", type=float, default=0.02)
     parser.add_argument(
         "--background-density",
         type=float,
@@ -186,6 +189,9 @@ def main(argv: list[str] | None = None) -> None:
         dest="background_margin",
         help="fractional padding of the background box beyond the shapes",
     )
+    parser.add_argument("--point-noise", type=float, default=0.02)
+    parser.add_argument("--field-noise", type=float, default=0.0)
+    parser.add_argument("--field-length-scale", type=float, default=0.25)
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--points-net", type=int, default=256, dest="n_points_net")
     parser.add_argument(
@@ -211,10 +217,12 @@ def main(argv: list[str] | None = None) -> None:
         n_samples=args.n_samples,
         density=args.density,
         size_range=(args.smin, args.smax),
-        noise=args.noise,
         background_density=args.background_density,
         background_margin=args.background_margin,
         run_rips=args.run_rips,
+        point_noise=args.point_noise,
+        field_noise=args.field_noise,
+        field_length_scale=args.field_length_scale,
         n_points_net=args.n_points_net,
         n_points_ph=args.n_points_ph or None,  # 0 -> None (no subsampling)
         epochs=args.epochs,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from tda_shapes.noise import apply_noise
 from tda_shapes import (
     DEFAULT_SHAPES,
     Annulus,
@@ -58,7 +59,7 @@ def test_actual_point_count_matches_expected():
 @pytest.mark.parametrize("size", [0.7, 2.0])
 def test_circle_points_on_circle(size):
     rng = np.random.default_rng(1)
-    pts = Circle().sample(density=DENSITY, size=size, noise=0.0, rng=rng)
+    pts = Circle().sample(density=DENSITY, size=size, point_noise=0.0, rng=rng)
     radii = np.linalg.norm(pts, axis=1)
     assert np.allclose(radii, size, atol=1e-9)
 
@@ -66,7 +67,7 @@ def test_circle_points_on_circle(size):
 def test_sphere_points_on_sphere():
     rng = np.random.default_rng(2)
     size = 1.3
-    pts = Sphere().sample(density=DENSITY, size=size, noise=0.0, rng=rng)
+    pts = Sphere().sample(density=DENSITY, size=size, point_noise=0.0, rng=rng)
     radii = np.linalg.norm(pts, axis=1)
     assert np.allclose(radii, size, atol=1e-9)
 
@@ -75,7 +76,7 @@ def test_annulus_radii_within_ring():
     rng = np.random.default_rng(3)
     shape = Annulus(inner_ratio=0.5)
     size = 2.0
-    pts = shape.sample(density=DENSITY, size=size, noise=0.0, rng=rng)
+    pts = shape.sample(density=DENSITY, size=size, point_noise=0.0, rng=rng)
     radii = np.linalg.norm(pts, axis=1)
     assert radii.min() >= 0.5 * size - 1e-9
     assert radii.max() <= size + 1e-9
@@ -84,7 +85,7 @@ def test_annulus_radii_within_ring():
 def test_two_circles_split_into_two_components():
     rng = np.random.default_rng(4)
     shape = TwoCircles(separation=4.0)
-    pts = shape.sample(density=DENSITY, size=1.0, noise=0.0, rng=rng)
+    pts = shape.sample(density=DENSITY, size=1.0, point_noise=0.0, rng=rng)
     # Left/right halves should both be populated and well separated in x.
     left = pts[pts[:, 0] < 0]
     right = pts[pts[:, 0] > 0]
@@ -110,7 +111,7 @@ def test_betti_numbers_are_ground_truth():
 def test_disk_is_uniform_by_area():
     # Uniform-by-area means the fraction of points inside radius t*size is t^2.
     rng = np.random.default_rng(5)
-    pts = Disk().sample(density=2000.0, size=1.0, noise=0.0, rng=rng)
+    pts = Disk().sample(density=2000.0, size=1.0, point_noise=0.0, rng=rng)
     radii = np.linalg.norm(pts, axis=1)
     for t in (0.25, 0.5, 0.75):
         frac = np.mean(radii < t)
@@ -122,7 +123,7 @@ def test_torus_theta_distribution_matches_area_density():
     # common than near the inner rim (cos~-1), matching (R + r cos theta).
     rng = np.random.default_rng(6)
     shape = Torus(tube_ratio=0.35)
-    pts = shape.sample(density=4000.0, size=1.0, noise=0.0, rng=rng)
+    pts = shape.sample(density=4000.0, size=1.0, point_noise=0.0, rng=rng)
     # Recover theta from z = r sin(theta) and rho = R + r cos(theta).
     rho = np.hypot(pts[:, 0], pts[:, 1])
     cos_theta = (rho - 1.0) / 0.35
@@ -132,24 +133,55 @@ def test_torus_theta_distribution_matches_area_density():
 
 def test_embed_dim_pads_planar_shapes_into_3d():
     rng = np.random.default_rng(7)
-    pts = Circle().sample(density=DENSITY, size=1.0, noise=0.0, rng=rng, embed_dim=3)
+    pts = Circle().sample(density=DENSITY, size=1.0, point_noise=0.0, rng=rng, embed_dim=3)
     assert pts.shape[1] == 3
     assert np.allclose(pts[:, 2], 0.0)
 
 
-def test_noise_perturbs_points_off_shape():
+def test_point_noise_perturbs_points_off_shape():
     rng = np.random.default_rng(8)
-    clean = Circle().sample(density=DENSITY, size=1.0, noise=0.0, rng=np.random.default_rng(8))
-    noisy = Circle().sample(density=DENSITY, size=1.0, noise=0.1, rng=rng)
+    clean = Circle().sample(density=DENSITY, size=1.0, point_noise=0.0, rng=np.random.default_rng(8))
+    noisy = Circle().sample(density=DENSITY, size=1.0, point_noise=0.1, rng=rng)
     # Same count, but noisy points no longer lie exactly on the unit circle.
     assert clean.shape == noisy.shape
     assert not np.allclose(np.linalg.norm(noisy, axis=1), 1.0, atol=1e-3)
 
 
 def test_sampling_is_reproducible():
-    a = Sphere().sample(density=DENSITY, size=1.0, noise=0.05, rng=42)
-    b = Sphere().sample(density=DENSITY, size=1.0, noise=0.05, rng=42)
+    a = Sphere().sample(density=DENSITY, size=1.0, point_noise=0.05, rng=42)
+    b = Sphere().sample(density=DENSITY, size=1.0, point_noise=0.05, rng=42)
     assert np.array_equal(a, b)
+
+
+def test_noise_scales_with_object_size():
+    points = np.zeros((1000, 3))
+    small = apply_noise(points, scale=1.0, rng=np.random.default_rng(0), point_noise=0.1)
+    large = apply_noise(points, scale=2.0, rng=np.random.default_rng(0), point_noise=0.1)
+    assert large.std() / small.std() == pytest.approx(2.0)
+
+
+def test_field_noise_is_smooth_and_reproducible():
+    x = np.linspace(0.0, 1.0, 200)
+    points = np.column_stack([x, np.zeros_like(x), np.zeros_like(x)])
+    a = apply_noise(
+        points,
+        scale=1.0,
+        rng=np.random.default_rng(0),
+        field_noise=0.05,
+        field_length_scale=0.4,
+    )
+    b = apply_noise(
+        points,
+        scale=1.0,
+        rng=np.random.default_rng(0),
+        field_noise=0.05,
+        field_length_scale=0.4,
+    )
+    disp = a - points
+    near = np.linalg.norm(np.diff(disp, axis=0), axis=1).mean()
+    far = np.linalg.norm(disp[:100] - disp[100:], axis=1).mean()
+    assert np.array_equal(a, b)
+    assert near < far
 
 
 # --- filled ball -----------------------------------------------------------
@@ -158,7 +190,7 @@ def test_sampling_is_reproducible():
 def test_ball_points_inside_ball():
     rng = np.random.default_rng(10)
     size = 1.4
-    pts = Ball().sample(density=300.0, size=size, noise=0.0, rng=rng)
+    pts = Ball().sample(density=300.0, size=size, point_noise=0.0, rng=rng)
     assert pts.shape[1] == 3
     assert np.linalg.norm(pts, axis=1).max() <= size + 1e-9
 
@@ -166,7 +198,7 @@ def test_ball_points_inside_ball():
 def test_ball_is_uniform_by_volume():
     # Fraction of points within radius t*size should be t^3 for a solid ball.
     rng = np.random.default_rng(11)
-    pts = Ball().sample(density=3000.0, size=1.0, noise=0.0, rng=rng)
+    pts = Ball().sample(density=3000.0, size=1.0, point_noise=0.0, rng=rng)
     radii = np.linalg.norm(pts, axis=1)
     for t in (0.3, 0.6, 0.9):
         assert np.mean(radii < t) == pytest.approx(t**3, abs=0.05)
@@ -185,7 +217,7 @@ def test_ball_count_scales_as_cube():
 def test_stretch_sphere_lies_on_ellipsoid():
     rng = np.random.default_rng(12)
     a, b, c = 1.0, 1.0, 2.0
-    pts = Sphere().sample(density=300.0, size=1.0, noise=0.0, stretch=(a, b, c), rng=rng)
+    pts = Sphere().sample(density=300.0, size=1.0, point_noise=0.0, stretch=(a, b, c), rng=rng)
     resid = (pts[:, 0] / a) ** 2 + (pts[:, 1] / b) ** 2 + (pts[:, 2] / c) ** 2
     assert np.allclose(resid, 1.0, atol=1e-9)
 
@@ -193,7 +225,7 @@ def test_stretch_sphere_lies_on_ellipsoid():
 def test_stretch_circle_lies_on_ellipse():
     rng = np.random.default_rng(13)
     a, b = 1.0, 3.0
-    pts = Circle().sample(density=300.0, size=1.0, noise=0.0, stretch=(a, b), rng=rng)
+    pts = Circle().sample(density=300.0, size=1.0, point_noise=0.0, stretch=(a, b), rng=rng)
     resid = (pts[:, 0] / a) ** 2 + (pts[:, 1] / b) ** 2
     assert np.allclose(resid, 1.0, atol=1e-9)
 
@@ -201,7 +233,7 @@ def test_stretch_circle_lies_on_ellipse():
 def test_isotropic_stretch_matches_size_count():
     # stretch=(k,k,k) must reproduce the count of size=k (constant density).
     sphere = Sphere()
-    n = len(sphere.sample(density=300.0, size=1.0, stretch=(2.0, 2.0, 2.0), noise=0.0, rng=0))
+    n = len(sphere.sample(density=300.0, size=1.0, stretch=(2.0, 2.0, 2.0), point_noise=0.0, rng=0))
     assert n == pytest.approx(sphere.expected_n(300.0, 2.0), rel=0.03)
 
 
@@ -212,7 +244,7 @@ def test_stretched_surface_density_is_uniform():
     # check that the two poles (small area) are not over-represented relative to
     # the equator the way a naive (non-reweighted) map would make them.
     rng = np.random.default_rng(14)
-    pts = Sphere().sample(density=4000.0, size=1.0, noise=0.0, stretch=(1, 1, 3), rng=rng)
+    pts = Sphere().sample(density=4000.0, size=1.0, point_noise=0.0, stretch=(1, 1, 3), rng=rng)
     z = pts[:, 2] / 3.0  # back to unit-sphere latitude cosine
     # Uniform-by-area on the ellipsoid puts more points near the equator (where
     # the stretched area is largest), so |z| small should dominate.
@@ -221,7 +253,7 @@ def test_stretched_surface_density_is_uniform():
 
 def test_solid_stretch_count_scales_with_product():
     disk = Disk()
-    n = len(disk.sample(density=300.0, size=1.0, stretch=(2.0, 3.0), noise=0.0, rng=0))
+    n = len(disk.sample(density=300.0, size=1.0, stretch=(2.0, 3.0), point_noise=0.0, rng=0))
     # area of stretched disk = pi * 2 * 3 ; count = density * area
     assert n == pytest.approx(300.0 * np.pi * 2.0 * 3.0, rel=0.02)
 
@@ -229,6 +261,6 @@ def test_solid_stretch_count_scales_with_product():
 def test_stretch_solid_disk_fills_ellipse():
     rng = np.random.default_rng(15)
     a, b = 2.0, 3.0
-    pts = Disk().sample(density=300.0, size=1.0, noise=0.0, stretch=(a, b), rng=rng)
+    pts = Disk().sample(density=300.0, size=1.0, point_noise=0.0, stretch=(a, b), rng=rng)
     resid = (pts[:, 0] / a) ** 2 + (pts[:, 1] / b) ** 2
     assert resid.max() <= 1.0 + 1e-9

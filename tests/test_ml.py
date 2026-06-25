@@ -42,7 +42,7 @@ def test_direct_betti_on_clean_shapes(shape, expected):
     from tda_shapes.ml.ph import cloud_diagrams, direct_betti
 
     rng = np.random.default_rng(0)
-    cloud = shape.sample(density=80, size=1.0, noise=0.0, embed_dim=3, rng=rng)
+    cloud = shape.sample(density=80, size=1.0, point_noise=0.0, embed_dim=3, rng=rng)
     dgms = cloud_diagrams(cloud, n_points=250, rng=rng)
     assert tuple(direct_betti(dgms, [0.25, 0.25, 0.25])) == expected
 
