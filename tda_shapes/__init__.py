@@ -8,6 +8,7 @@ from .composite import (
     sample_composite,
 )
 from .dataset import ShapeDataset, make_dataset
+from .images import ImageDataset, make_image_dataset, rasterize_kde
 from .shapes import (
     DEFAULT_SHAPES,
     Annulus,
@@ -39,6 +40,9 @@ __all__ = [
     "DEFAULT_SHAPES",
     "ShapeDataset",
     "make_dataset",
+    "ImageDataset",
+    "make_image_dataset",
+    "rasterize_kde",
     "Composite",
     "CompositeDataset",
     "sample_composite",
