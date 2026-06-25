@@ -70,6 +70,7 @@ def _smooth_vector_field(
     for axis in range(points.shape[1]):
         shifted = np.cos(projection + phase[:, axis])
         vals = factor * (shifted @ weights[:, axis])
+        vals = vals - vals.mean()
         std = float(vals.std())
         disp[:, axis] = vals / std if std > 1e-12 else vals
     return amplitude * disp

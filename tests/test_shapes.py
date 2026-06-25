@@ -184,6 +184,18 @@ def test_field_noise_is_smooth_and_reproducible():
     assert near < far
 
 
+def test_field_noise_does_not_add_rigid_translation():
+    points = np.random.default_rng(0).standard_normal((200, 3))
+    noisy = apply_noise(
+        points,
+        scale=1.0,
+        rng=np.random.default_rng(1),
+        field_noise=0.05,
+        field_length_scale=1e6,
+    )
+    assert np.allclose((noisy - points).mean(axis=0), 0.0, atol=1e-10)
+
+
 # --- filled ball -----------------------------------------------------------
 
 
