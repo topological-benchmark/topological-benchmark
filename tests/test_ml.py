@@ -301,3 +301,27 @@ def test_run_benchmark_smoke():
     for m in results.values():
         assert 0.0 <= m["exact"] <= 1.0
         assert m["mae"]["overall"] >= 0.0
+
+
+def test_run_benchmark_cubical_smoke():
+    from tda_shapes.ml.benchmark import run_benchmark
+
+    results = run_benchmark(
+        k=1,
+        n_samples=12,
+        density=12.0,
+        epochs=1,
+        n_points_ph=32,
+        run_pointnet2=False,
+        run_cubical=True,
+        image_resolution=12,
+        image_bandwidth=0.4,
+        image_backend="numpy",
+        representation="silhouette",
+        seed=0,
+        verbose=False,
+    )
+    assert set(results) == {"pointnet", "gudhi_cech", "gudhi_cubical"}
+    for m in results.values():
+        assert 0.0 <= m["exact"] <= 1.0
+        assert m["mae"]["overall"] >= 0.0

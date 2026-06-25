@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..composite import make_composite_dataset
+from ..images import ImageBackend, rasterize_kde
 from .data import pointnet_arrays, train_test_split_idx
 from .metrics import betti_metrics, format_comparison
 
 if TYPE_CHECKING:
     from .ph import GudhiRepresentation
-
 
 def run_benchmark(
     *,
@@ -34,9 +34,14 @@ def run_benchmark(
     field_length_scale: float = 0.25,
     n_points_net: int | None = 256,
     n_points_ph: int | None = 256,
-    representation: GudhiRepresentation = "betti",
+    representation: GudhiRepresentation = "silhouette",
     run_pointnet2: bool = True,
     run_rips: bool = False,
+    run_cubical: bool = False,
+    image_resolution: int = 32,
+    image_bandwidth: float = 0.15,
+    image_backend: ImageBackend = "gpu",
+    image_min_pixels_per_bandwidth: float = 1.0,
     epochs: int = 80,
     test_frac: float = 0.3,
     val_frac: float = 0.2,
@@ -60,8 +65,9 @@ def run_benchmark(
     subsampling keeps even the largest cloud tractable.
 
     ``representation`` selects the GUDHI diagram vectorization fed to the random
-    forest (default ``"betti"``); see :data:`tda_shapes.ml.ph.GudhiRepresentation`
-    for the full list. It applies to both the Cech and (opt-in) Rips pipelines.
+    forest (default ``"silhouette"``); see
+    :data:`tda_shapes.ml.ph.GudhiRepresentation` for the full list. It applies
+    to Cech, Cubical, and (opt-in) Rips pipelines.
 
     ``val_frac`` carves a validation split out of the training portion (default
     0.2; set 0 to disable). All learned models fit on the reduced train set, and
@@ -145,6 +151,30 @@ def run_benchmark(
     pred_cech = cech.fit(clouds_tr, y_tr).predict(clouds_te)
     results["gudhi_cech"] = betti_metrics(y_te, pred_cech)
 
+    # --- GUDHI Cubical sklearn image pipeline -------------------------------
+    if run_cubical:
+        from .ph import cubical_betti_pipeline
+
+        if verbose:
+            print(
+                "Rasterizing KDE images "
+                f"({image_resolution}^3, backend={image_backend}) ..."
+            )
+        images = _rasterize_clouds(
+            ds.clouds,
+            resolution=image_resolution,
+            bandwidth=image_bandwidth,
+            backend=image_backend,
+            min_pixels_per_bandwidth=image_min_pixels_per_bandwidth,
+        )
+        if verbose:
+            print(f"Fitting GUDHI Cubical pipeline ({image_resolution}^3, H0-H2) ...")
+        cubical = cubical_betti_pipeline(
+            representation=representation, random_state=seed
+        )
+        pred_cubical = cubical.fit(images[train_idx], y_tr).predict(images[test_idx])
+        results["gudhi_cubical"] = betti_metrics(y_te, pred_cubical)
+
     # --- Vietoris-Rips predictors (opt-in via run_rips) ---------------------
     taus = None
     if run_rips:
@@ -189,6 +219,31 @@ def run_benchmark(
         if taus is not None:
             print(f"\n(PH direct tuned taus = {np.round(taus, 3).tolist()})")
     return results
+
+
+def _rasterize_clouds(
+    clouds: list[np.ndarray],
+    *,
+    resolution: int,
+    bandwidth: float,
+    backend: ImageBackend,
+    min_pixels_per_bandwidth: float,
+) -> np.ndarray:
+    images = []
+    for cloud in clouds:
+        lo = cloud.min(axis=0)
+        hi = cloud.max(axis=0)
+        scale = max(0.5 * float(np.max(hi - lo)), 1e-12)
+        images.append(
+            rasterize_kde(
+                cloud,
+                resolution=resolution,
+                bandwidth=bandwidth * scale,
+                min_pixels_per_bandwidth=min_pixels_per_bandwidth,
+                backend=backend,
+            )
+        )
+    return np.stack(images)
 
 
 def _plot(results: dict[str, dict], path: str) -> None:
@@ -277,9 +332,25 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--representation",
+        "--tda-representation",
         choices=get_args(GudhiRepresentation),
-        default="betti",
-        help="GUDHI diagram vectorization for the Cech/Rips pipelines",
+        default="silhouette",
+        dest="representation",
+        help="GUDHI diagram vectorization for Cech/Rips/Cubical pipelines",
+    )
+    parser.add_argument("--cubical", action="store_true", dest="run_cubical")
+    parser.add_argument("--image-resolution", type=int, default=32)
+    parser.add_argument("--image-bandwidth", type=float, default=0.15)
+    parser.add_argument(
+        "--image-backend",
+        choices=("numpy", "gpu", "jax", "mps", "cuda"),
+        default="gpu",
+    )
+    parser.add_argument(
+        "--image-min-pixels-per-bandwidth",
+        type=float,
+        default=1.0,
+        dest="image_min_pixels_per_bandwidth",
     )
     parser.add_argument(
         "--val-frac",
@@ -301,6 +372,7 @@ def main(argv: list[str] | None = None) -> None:
         background_density=args.background_density,
         background_margin=args.background_margin,
         run_rips=args.run_rips,
+        run_cubical=args.run_cubical,
         point_noise=args.point_noise,
         field_noise=args.field_noise,
         field_length_scale=args.field_length_scale,
@@ -308,6 +380,10 @@ def main(argv: list[str] | None = None) -> None:
         n_points_ph=args.n_points_ph or None,  # 0 -> None (no subsampling)
         representation=args.representation,
         run_pointnet2=args.run_pointnet2,
+        image_resolution=args.image_resolution,
+        image_bandwidth=args.image_bandwidth,
+        image_backend=args.image_backend,
+        image_min_pixels_per_bandwidth=args.image_min_pixels_per_bandwidth,
         epochs=args.epochs,
         val_frac=args.val_frac,
         seed=args.seed,
