@@ -28,6 +28,7 @@ def run_benchmark(
     background_margin: float = 0.0,
     n_points_net: int = 256,
     n_points_ph: int | None = 256,
+    run_rips: bool = False,
     epochs: int = 80,
     test_frac: float = 0.3,
     seed: int = 0,
@@ -35,22 +36,17 @@ def run_benchmark(
 ) -> dict[str, dict]:
     """Build a composite dataset and evaluate all predictors on one split.
 
-    Returns ``{method_name: betti_metrics(...)}`` for ``pointnet``,
-    ``gudhi_rips``, ``gudhi_cech``, ``ripser_learned`` and ``ripser_direct``.
+    Returns ``{method_name: betti_metrics(...)}`` always for ``pointnet`` and
+    ``gudhi_cech``; the Vietoris-Rips predictors ``gudhi_rips``,
+    ``ripser_learned`` and ``ripser_direct`` are included only when
+    ``run_rips=True`` (off by default).
 
     ``n_points_ph`` subsamples each cloud before persistent homology (default
     256); pass ``None`` to run on the **full** cloud. Because Rips-H2 is O(N^3),
     subsampling keeps even the largest cloud tractable.
     """
     # Imported here so the heavy deps load only when the benchmark runs.
-    from .ph import (
-        PHRegressor,
-        cech_betti_pipeline,
-        compute_ph,
-        direct_betti,
-        gudhi_betti_pipeline,
-        tune_taus,
-    )
+    from .ph import cech_betti_pipeline
     from .pointnet import predict_pointnet, train_pointnet
 
     rng = np.random.default_rng(seed)
@@ -90,40 +86,53 @@ def run_benchmark(
     pred_net = predict_pointnet(model, x[test_idx])
     results["pointnet"] = betti_metrics(y_te, pred_net)
 
-    # --- GUDHI sklearn point-cloud pipelines --------------------------------
+    # --- GUDHI Cech sklearn point-cloud pipeline ----------------------------
     if verbose:
         where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
-        print(f"Fitting GUDHI Rips/Cech pipelines ({where}, H0-H2) ...")
-    gudhi = gudhi_betti_pipeline(n_points=n_points_ph, random_state=seed)
-    pred_gudhi = gudhi.fit(clouds_tr, y_tr).predict(clouds_te)
-    results["gudhi_rips"] = betti_metrics(y_te, pred_gudhi)
-
+        print(f"Fitting GUDHI Cech pipeline ({where}, H0-H2) ...")
     cech = cech_betti_pipeline(n_points=n_points_ph, random_state=seed)
     pred_cech = cech.fit(clouds_tr, y_tr).predict(clouds_te)
     results["gudhi_cech"] = betti_metrics(y_te, pred_cech)
 
-    # --- Ripser persistent homology (shared diagram computation) -------------
-    if verbose:
-        where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
-        print(f"Computing persistence diagrams ({where}, H0-H2) ...")
-    feats, dgms = compute_ph(ds.clouds, n_points=n_points_ph, rng=rng)
-    feats_tr, feats_te = feats[train_idx], feats[test_idx]
-    dgms_tr = [dgms[i] for i in train_idx]
-    dgms_te = [dgms[i] for i in test_idx]
+    # --- Vietoris-Rips predictors (opt-in via run_rips) ---------------------
+    taus = None
+    if run_rips:
+        from .ph import (
+            PHRegressor,
+            compute_ph,
+            direct_betti,
+            gudhi_betti_pipeline,
+            tune_taus,
+        )
 
-    if verbose:
-        print("Fitting Ripser feature model ...")
-    ph = PHRegressor(random_state=seed).fit(feats_tr, y_tr)
-    results["ripser_learned"] = betti_metrics(y_te, ph.predict(feats_te))
+        if verbose:
+            where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
+            print(f"Fitting GUDHI Rips pipeline ({where}, H0-H2) ...")
+        gudhi = gudhi_betti_pipeline(n_points=n_points_ph, random_state=seed)
+        pred_gudhi = gudhi.fit(clouds_tr, y_tr).predict(clouds_te)
+        results["gudhi_rips"] = betti_metrics(y_te, pred_gudhi)
 
-    taus = tune_taus(dgms_tr, y_tr)
-    pred_direct = np.vstack([direct_betti(d, taus) for d in dgms_te])
-    results["ripser_direct"] = betti_metrics(y_te, pred_direct)
+        if verbose:
+            print(f"Computing Ripser persistence diagrams ({where}, H0-H2) ...")
+        feats, dgms = compute_ph(ds.clouds, n_points=n_points_ph, rng=rng)
+        feats_tr, feats_te = feats[train_idx], feats[test_idx]
+        dgms_tr = [dgms[i] for i in train_idx]
+        dgms_te = [dgms[i] for i in test_idx]
+
+        if verbose:
+            print("Fitting Ripser feature model ...")
+        ph = PHRegressor(random_state=seed).fit(feats_tr, y_tr)
+        results["ripser_learned"] = betti_metrics(y_te, ph.predict(feats_te))
+
+        taus = tune_taus(dgms_tr, y_tr)
+        pred_direct = np.vstack([direct_betti(d, taus) for d in dgms_te])
+        results["ripser_direct"] = betti_metrics(y_te, pred_direct)
 
     if verbose:
         print(f"\nBetti-number prediction on {len(test_idx)} held-out scenes (k={k}):\n")
         print(format_comparison(results))
-        print(f"\n(PH direct tuned taus = {np.round(taus, 3).tolist()})")
+        if taus is not None:
+            print(f"\n(PH direct tuned taus = {np.round(taus, 3).tolist()})")
     return results
 
 
@@ -186,6 +195,13 @@ def main(argv: list[str] | None = None) -> None:
         dest="n_points_ph",
         help="subsample size for persistent homology; 0 = use the full cloud",
     )
+    parser.add_argument(
+        "--rips",
+        action="store_true",
+        dest="run_rips",
+        help="also run the Vietoris-Rips predictors (gudhi_rips, ripser_*); "
+        "off by default",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--plot", type=str, default=None, metavar="PATH")
     args = parser.parse_args(argv)
@@ -198,6 +214,7 @@ def main(argv: list[str] | None = None) -> None:
         noise=args.noise,
         background_density=args.background_density,
         background_margin=args.background_margin,
+        run_rips=args.run_rips,
         n_points_net=args.n_points_net,
         n_points_ph=args.n_points_ph or None,  # 0 -> None (no subsampling)
         epochs=args.epochs,
