@@ -71,6 +71,59 @@ def test_ph_regressor_fits_and_predicts_integers():
     assert (pred >= 0).all()
 
 
+def test_ripser_pipeline_fits_point_clouds():
+    from tda_shapes.ml.ph import ripser_betti_pipeline
+
+    rng = np.random.default_rng(0)
+    clouds = [
+        Circle().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Disk().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Sphere().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Annulus().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+    ]
+    y = np.array([(1, 1, 0), (1, 0, 0), (1, 0, 1), (1, 1, 0)])
+    model = ripser_betti_pipeline(n_points=48, n_estimators=5, random_state=0)
+    pred = model.fit(clouds, y).predict(clouds)
+    assert pred.shape == y.shape
+    assert pred.dtype.kind == "i"
+
+
+def test_gudhi_pipeline_fits_point_clouds():
+    pytest.importorskip("gudhi")
+    from tda_shapes.ml.ph import gudhi_betti_pipeline
+
+    rng = np.random.default_rng(0)
+    clouds = [
+        Circle().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Disk().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Sphere().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Annulus().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+    ]
+    y = np.array([(1, 1, 0), (1, 0, 0), (1, 0, 1), (1, 1, 0)])
+    model = gudhi_betti_pipeline(n_points=48, grid=8, n_estimators=5, random_state=0)
+    pred = model.fit(clouds, y).predict(clouds)
+    assert pred.shape == y.shape
+    assert pred.dtype.kind == "i"
+
+
+def test_cech_pipeline_fits_point_clouds():
+    pytest.importorskip("gudhi")
+    from tda_shapes.ml.ph import cech_betti_pipeline
+
+    rng = np.random.default_rng(0)
+    clouds = [
+        Circle().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Disk().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Sphere().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+        Annulus().sample(density=30, size=1.0, embed_dim=3, rng=rng),
+    ]
+    y = np.array([(1, 1, 0), (1, 0, 0), (1, 0, 1), (1, 1, 0)])
+    model = cech_betti_pipeline(n_points=32, grid=8, n_estimators=5, random_state=0)
+    pred = model.fit(clouds, y).predict(clouds)
+    assert pred.shape == y.shape
+    assert pred.dtype.kind == "i"
+
+
 # --- PointNet --------------------------------------------------------------
 
 
@@ -132,7 +185,13 @@ def test_run_benchmark_smoke():
     results = run_benchmark(
         k=2, n_samples=20, density=12.0, epochs=2, n_points_ph=64, seed=0, verbose=False
     )
-    assert set(results) == {"pointnet", "ph_learned", "ph_direct"}
+    assert set(results) == {
+        "pointnet",
+        "gudhi_rips",
+        "gudhi_cech",
+        "ripser_learned",
+        "ripser_direct",
+    }
     for m in results.values():
         assert 0.0 <= m["exact"] <= 1.0
         assert m["mae"]["overall"] >= 0.0

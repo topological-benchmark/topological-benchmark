@@ -1,4 +1,4 @@
-"""Compare PointNet vs. persistent homology on predicting Betti numbers.
+"""Compare PointNet vs. TDA baselines on predicting Betti numbers.
 
 Run directly::
 
@@ -31,17 +31,24 @@ def run_benchmark(
     seed: int = 0,
     verbose: bool = True,
 ) -> dict[str, dict]:
-    """Build a composite dataset and evaluate all three predictors on one split.
+    """Build a composite dataset and evaluate all predictors on one split.
 
     Returns ``{method_name: betti_metrics(...)}`` for ``pointnet``,
-    ``ph_learned`` and ``ph_direct``.
+    ``gudhi_rips``, ``gudhi_cech``, ``ripser_learned`` and ``ripser_direct``.
 
     ``n_points_ph=None`` runs persistent homology on the **full** cloud (no
     subsampling). Because Rips-H2 is O(N^3), the default ``density``/``size_range``
     are kept low so even the largest cloud stays tractable.
     """
     # Imported here so the heavy deps load only when the benchmark runs.
-    from .ph import PHRegressor, compute_ph, direct_betti, tune_taus
+    from .ph import (
+        PHRegressor,
+        cech_betti_pipeline,
+        compute_ph,
+        direct_betti,
+        gudhi_betti_pipeline,
+        tune_taus,
+    )
     from .pointnet import predict_pointnet, train_pointnet
 
     rng = np.random.default_rng(seed)
@@ -65,6 +72,8 @@ def run_benchmark(
     y = np.asarray(ds.betti, dtype=int)
     train_idx, test_idx = train_test_split_idx(len(ds), frac=test_frac, rng=rng)
     y_tr, y_te = y[train_idx], y[test_idx]
+    clouds_tr = [ds.clouds[i] for i in train_idx]
+    clouds_te = [ds.clouds[i] for i in test_idx]
     results: dict[str, dict] = {}
 
     # --- PointNet -----------------------------------------------------------
@@ -77,7 +86,19 @@ def run_benchmark(
     pred_net = predict_pointnet(model, x[test_idx])
     results["pointnet"] = betti_metrics(y_te, pred_net)
 
-    # --- Persistent homology (shared diagram computation) -------------------
+    # --- GUDHI sklearn point-cloud pipelines --------------------------------
+    if verbose:
+        where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
+        print(f"Fitting GUDHI Rips/Cech pipelines ({where}, H0-H2) ...")
+    gudhi = gudhi_betti_pipeline(n_points=n_points_ph, random_state=seed)
+    pred_gudhi = gudhi.fit(clouds_tr, y_tr).predict(clouds_te)
+    results["gudhi_rips"] = betti_metrics(y_te, pred_gudhi)
+
+    cech = cech_betti_pipeline(n_points=n_points_ph, random_state=seed)
+    pred_cech = cech.fit(clouds_tr, y_tr).predict(clouds_te)
+    results["gudhi_cech"] = betti_metrics(y_te, pred_cech)
+
+    # --- Ripser persistent homology (shared diagram computation) -------------
     if verbose:
         where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
         print(f"Computing persistence diagrams ({where}, H0-H2) ...")
@@ -87,13 +108,13 @@ def run_benchmark(
     dgms_te = [dgms[i] for i in test_idx]
 
     if verbose:
-        print("Fitting PH feature model ...")
+        print("Fitting Ripser feature model ...")
     ph = PHRegressor(random_state=seed).fit(feats_tr, y_tr)
-    results["ph_learned"] = betti_metrics(y_te, ph.predict(feats_te))
+    results["ripser_learned"] = betti_metrics(y_te, ph.predict(feats_te))
 
     taus = tune_taus(dgms_tr, y_tr)
     pred_direct = np.vstack([direct_betti(d, taus) for d in dgms_te])
-    results["ph_direct"] = betti_metrics(y_te, pred_direct)
+    results["ripser_direct"] = betti_metrics(y_te, pred_direct)
 
     if verbose:
         print(f"\nBetti-number prediction on {len(test_idx)} held-out scenes (k={k}):\n")
