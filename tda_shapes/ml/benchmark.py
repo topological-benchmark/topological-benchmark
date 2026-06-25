@@ -9,12 +9,16 @@ Run directly::
 from __future__ import annotations
 
 import argparse
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ..composite import make_composite_dataset
 from .data import pointnet_arrays, train_test_split_idx
 from .metrics import betti_metrics, format_comparison
+
+if TYPE_CHECKING:
+    from .ph import GudhiRepresentation
 
 
 def run_benchmark(
@@ -28,24 +32,41 @@ def run_benchmark(
     point_noise: float = 0.02,
     field_noise: float = 0.0,
     field_length_scale: float = 0.25,
-    n_points_net: int = 256,
+    n_points_net: int | None = 256,
     n_points_ph: int | None = 256,
+    representation: GudhiRepresentation = "betti",
+    run_pointnet2: bool = True,
     run_rips: bool = False,
     epochs: int = 80,
     test_frac: float = 0.3,
+    val_frac: float = 0.2,
     seed: int = 0,
     verbose: bool = True,
 ) -> dict[str, dict]:
     """Build a composite dataset and evaluate all predictors on one split.
 
     Returns ``{method_name: betti_metrics(...)}`` always for ``pointnet`` and
-    ``gudhi_cech``; the Vietoris-Rips predictors ``gudhi_rips``,
-    ``ripser_learned`` and ``ripser_direct`` are included only when
+    ``gudhi_cech``; ``pointnet++`` (PointNet++ set abstraction) is included when
+    ``run_pointnet2=True`` (on by default), and the Vietoris-Rips predictors
+    ``gudhi_rips``, ``ripser_learned`` and ``ripser_direct`` only when
     ``run_rips=True`` (off by default).
+
+    ``n_points_net`` resamples each cloud to a fixed size for PointNet (default
+    256); pass ``None`` to use the **full** cloud (duplicate-padded to the
+    dataset's largest cloud, which the global max-pool ignores).
 
     ``n_points_ph`` subsamples each cloud before persistent homology (default
     256); pass ``None`` to run on the **full** cloud. Because Rips-H2 is O(N^3),
     subsampling keeps even the largest cloud tractable.
+
+    ``representation`` selects the GUDHI diagram vectorization fed to the random
+    forest (default ``"betti"``); see :data:`tda_shapes.ml.ph.GudhiRepresentation`
+    for the full list. It applies to both the Cech and (opt-in) Rips pipelines.
+
+    ``val_frac`` carves a validation split out of the training portion (default
+    0.2; set 0 to disable). All learned models fit on the reduced train set, and
+    PointNet reports train/val accuracy each logged epoch so overfitting shows up
+    during training. Final metrics are still computed on the untouched test set.
     """
     # Imported here so the heavy deps load only when the benchmark runs.
     from .ph import cech_betti_pipeline
@@ -75,6 +96,14 @@ def run_benchmark(
         )
     y = np.asarray(ds.betti, dtype=int)
     train_idx, test_idx = train_test_split_idx(len(ds), frac=test_frac, rng=rng)
+    # Carve a validation split out of the training portion so the test set stays
+    # a clean final holdout; every learned model fits on the reduced train set.
+    if val_frac > 0:
+        rel_fit, rel_val = train_test_split_idx(len(train_idx), frac=val_frac, rng=rng)
+        val_idx = train_idx[rel_val]
+        train_idx = train_idx[rel_fit]
+    else:
+        val_idx = np.empty(0, dtype=int)
     y_tr, y_te = y[train_idx], y[test_idx]
     clouds_tr = [ds.clouds[i] for i in train_idx]
     clouds_te = [ds.clouds[i] for i in test_idx]
@@ -82,19 +111,37 @@ def run_benchmark(
 
     # --- PointNet -----------------------------------------------------------
     if verbose:
-        print("Training PointNet ...")
+        where = "full cloud" if n_points_net is None else f"{n_points_net} pts"
+        val_note = f", val={len(val_idx)}" if len(val_idx) else ""
+        print(f"Training PointNet ({where}, train={len(train_idx)}{val_note}) ...")
     x, _ = pointnet_arrays(ds, n_points=n_points_net, rng=rng)
+    val = (x[val_idx], y[val_idx]) if len(val_idx) else None
     model = train_pointnet(
-        x[train_idx], y_tr.astype(np.float32), epochs=epochs, rng=seed, verbose=verbose
+        x[train_idx], y_tr, epochs=epochs, rng=seed, val=val, verbose=verbose
     )
     pred_net = predict_pointnet(model, x[test_idx])
     results["pointnet"] = betti_metrics(y_te, pred_net)
 
+    # --- PointNet++ (hierarchical set abstraction) --------------------------
+    if run_pointnet2:
+        if verbose:
+            print(f"Training PointNet++ ({where}, train={len(train_idx)}{val_note}) ...")
+        model2 = train_pointnet(
+            x[train_idx], y_tr, epochs=epochs, rng=seed, val=val,
+            arch="pointnet2", verbose=verbose,
+        )
+        pred_net2 = predict_pointnet(model2, x[test_idx])
+        results["pointnet++"] = betti_metrics(y_te, pred_net2)
+
     # --- GUDHI Cech sklearn point-cloud pipeline ----------------------------
     if verbose:
         where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
-        print(f"Fitting GUDHI Cech pipeline ({where}, H0-H2) ...")
-    cech = cech_betti_pipeline(n_points=n_points_ph, random_state=seed)
+        print(
+            f"Fitting GUDHI Cech pipeline ({where}, H0-H2, {representation}) ..."
+        )
+    cech = cech_betti_pipeline(
+        n_points=n_points_ph, representation=representation, random_state=seed
+    )
     pred_cech = cech.fit(clouds_tr, y_tr).predict(clouds_te)
     results["gudhi_cech"] = betti_metrics(y_te, pred_cech)
 
@@ -102,7 +149,7 @@ def run_benchmark(
     taus = None
     if run_rips:
         from .ph import (
-            PHRegressor,
+            PHClassifier,
             compute_ph,
             direct_betti,
             gudhi_betti_pipeline,
@@ -111,8 +158,12 @@ def run_benchmark(
 
         if verbose:
             where = "full cloud" if n_points_ph is None else f"{n_points_ph} pts"
-            print(f"Fitting GUDHI Rips pipeline ({where}, H0-H2) ...")
-        gudhi = gudhi_betti_pipeline(n_points=n_points_ph, random_state=seed)
+            print(
+                f"Fitting GUDHI Rips pipeline ({where}, H0-H2, {representation}) ..."
+            )
+        gudhi = gudhi_betti_pipeline(
+            n_points=n_points_ph, representation=representation, random_state=seed
+        )
         pred_gudhi = gudhi.fit(clouds_tr, y_tr).predict(clouds_te)
         results["gudhi_rips"] = betti_metrics(y_te, pred_gudhi)
 
@@ -125,7 +176,7 @@ def run_benchmark(
 
         if verbose:
             print("Fitting Ripser feature model ...")
-        ph = PHRegressor(random_state=seed).fit(feats_tr, y_tr)
+        ph = PHClassifier(random_state=seed).fit(feats_tr, y_tr)
         results["ripser_learned"] = betti_metrics(y_te, ph.predict(feats_te))
 
         taus = tune_taus(dgms_tr, y_tr)
@@ -169,6 +220,10 @@ def _plot(results: dict[str, dict], path: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    from typing import get_args
+
+    from .ph import GudhiRepresentation
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--k", type=int, default=3, help="shapes per composite scene")
     parser.add_argument("--n", type=int, default=600, dest="n_samples")
@@ -193,7 +248,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--field-noise", type=float, default=0.0)
     parser.add_argument("--field-length-scale", type=float, default=0.25)
     parser.add_argument("--epochs", type=int, default=80)
-    parser.add_argument("--points-net", type=int, default=256, dest="n_points_net")
+    parser.add_argument(
+        "--points-net",
+        type=int,
+        default=0,
+        dest="n_points_net",
+        help="fixed cloud size fed to PointNet; 0 = use the full cloud",
+    )
     parser.add_argument(
         "--points-ph",
         type=int,
@@ -207,6 +268,26 @@ def main(argv: list[str] | None = None) -> None:
         dest="run_rips",
         help="also run the Vietoris-Rips predictors (gudhi_rips, ripser_*); "
         "off by default",
+    )
+    parser.add_argument(
+        "--no-pointnet2",
+        action="store_false",
+        dest="run_pointnet2",
+        help="skip the PointNet++ predictor (on by default)",
+    )
+    parser.add_argument(
+        "--representation",
+        choices=get_args(GudhiRepresentation),
+        default="betti",
+        help="GUDHI diagram vectorization for the Cech/Rips pipelines",
+    )
+    parser.add_argument(
+        "--val-frac",
+        type=float,
+        default=0.2,
+        dest="val_frac",
+        help="fraction of the training set held out for validation; "
+        "0 = no validation monitoring",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--plot", type=str, default=None, metavar="PATH")
@@ -223,9 +304,12 @@ def main(argv: list[str] | None = None) -> None:
         point_noise=args.point_noise,
         field_noise=args.field_noise,
         field_length_scale=args.field_length_scale,
-        n_points_net=args.n_points_net,
+        n_points_net=args.n_points_net or None,  # 0 -> None (use full cloud)
         n_points_ph=args.n_points_ph or None,  # 0 -> None (no subsampling)
+        representation=args.representation,
+        run_pointnet2=args.run_pointnet2,
         epochs=args.epochs,
+        val_frac=args.val_frac,
         seed=args.seed,
     )
     if args.plot:

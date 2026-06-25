@@ -34,15 +34,22 @@ def to_fixed_size(pts: np.ndarray, p: int, rng: np.random.Generator) -> np.ndarr
 def pointnet_arrays(
     dataset,
     *,
-    n_points: int = 512,
+    n_points: int | None = None,
     rng: RngLike = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Turn a dataset into dense PointNet tensors.
 
     Returns ``X (M, n_points, 3) float32`` of normalized, fixed-size clouds and
     ``y (M, 3) float32`` Betti targets.
+
+    ``n_points=None`` (the default) keeps **all** points: every cloud is
+    duplicate-padded up to the largest cloud in the dataset. Because PointNet
+    aggregates with a global max-pool, those duplicates do not change the pooled
+    feature, so this is equivalent to feeding each cloud's full point set.
     """
     rng = np.random.default_rng(rng)
+    if n_points is None:
+        n_points = max(len(c) for c in dataset.clouds)
     x = np.empty((len(dataset.clouds), n_points, 3), dtype=np.float32)
     for i, cloud in enumerate(dataset.clouds):
         pts = to_fixed_size(np.asarray(cloud, dtype=np.float64), n_points, rng)

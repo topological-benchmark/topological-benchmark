@@ -5,7 +5,7 @@ diagrams up to H2. From the diagrams we build:
 
 * a training-free :func:`direct_betti` baseline that counts long-lived intervals, and
 * a feature vector (:func:`diagram_features`) — per-dimension Betti curves plus
-  persistence statistics — fed to a learned :class:`PHRegressor`.
+  persistence statistics — fed to a learned :class:`PHClassifier`.
 
 GUDHI's scikit-learn API is exposed through :func:`gudhi_betti_pipeline`,
 :func:`cech_betti_pipeline`, and :func:`cubical_betti_pipeline`.
@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import numpy as np
 from ripser import ripser
-from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.cluster import KMeans
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import FeatureUnion, Pipeline
 from typing import Literal
 
@@ -242,8 +242,12 @@ def compute_ph(
     return feats, dgms_list
 
 
-class PHRegressor(BaseEstimator, RegressorMixin):
-    """Random-forest multi-output regressor on persistence-diagram features."""
+class PHClassifier(BaseEstimator, ClassifierMixin):
+    """Random-forest multi-output classifier on persistence-diagram features.
+
+    Each Betti dimension is a separate categorical target; scikit-learn's random
+    forest handles the multi-output labels ``(N, D)`` natively.
+    """
 
     def __init__(
         self, n_estimators: int = 300, random_state: int = 0, n_jobs: int | None = -1
@@ -252,18 +256,17 @@ class PHRegressor(BaseEstimator, RegressorMixin):
         self.random_state = random_state
         self.n_jobs = n_jobs
 
-    def fit(self, x: np.ndarray, y: np.ndarray) -> "PHRegressor":
-        self.model_ = RandomForestRegressor(
+    def fit(self, x: np.ndarray, y: np.ndarray) -> "PHClassifier":
+        self.model_ = RandomForestClassifier(
             n_estimators=self.n_estimators,
             random_state=self.random_state,
             n_jobs=self.n_jobs,
         )
-        self.model_.fit(x, y)
+        self.model_.fit(x, np.asarray(y).astype(int))
         return self
 
     def predict(self, x: np.ndarray) -> np.ndarray:
-        pred = self.model_.predict(x)
-        return np.clip(np.rint(pred), 0, None).astype(int)
+        return np.asarray(self.model_.predict(x)).astype(int)
 
 
 def ripser_betti_pipeline(
@@ -288,7 +291,7 @@ def ripser_betti_pipeline(
                     random_state=random_state,
                 ),
             ),
-            ("model", PHRegressor(n_estimators=n_estimators, random_state=random_state)),
+            ("model", PHClassifier(n_estimators=n_estimators, random_state=random_state)),
         ]
     )
 
@@ -371,7 +374,7 @@ def _gudhi_diagram_pipeline(
             ("features", FeatureUnion(branches)),
             (
                 "model",
-                PHRegressor(
+                PHClassifier(
                     n_estimators=n_estimators,
                     random_state=random_state,
                     n_jobs=n_jobs,

@@ -58,13 +58,13 @@ def test_diagram_features_shape_and_finiteness():
     assert np.isfinite(feats).all()
 
 
-def test_ph_regressor_fits_and_predicts_integers():
-    from tda_shapes.ml.ph import PHRegressor
+def test_ph_classifier_fits_and_predicts_integers():
+    from tda_shapes.ml.ph import PHClassifier
 
     rng = np.random.default_rng(0)
     x = rng.standard_normal((20, 12))
     y = rng.integers(0, 3, size=(20, 3))
-    model = PHRegressor(n_estimators=20).fit(x, y)
+    model = PHClassifier(n_estimators=20).fit(x, y)
     pred = model.predict(x)
     assert pred.shape == (20, 3)
     assert pred.dtype.kind == "i"
@@ -190,11 +190,13 @@ def test_cubical_pipeline_fits_images():
 def test_pointnet_forward_shape():
     import torch
 
-    from tda_shapes.ml.pointnet import PointNetRegressor
+    from tda_shapes.ml.pointnet import PointNetClassifier
 
-    model = PointNetRegressor()
+    model = PointNetClassifier(n_classes=[2, 3, 2])
+    model.eval()  # BatchNorm with a single forward pass
     out = model(torch.randn(4, 100, 3))
-    assert out.shape == (4, 3)
+    assert isinstance(out, list) and len(out) == 3
+    assert [o.shape for o in out] == [(4, 2), (4, 3), (4, 2)]
 
 
 def test_pointnet_overfits_tiny_set():
@@ -221,6 +223,42 @@ def test_pointnet_overfits_tiny_set():
     model = train_pointnet(x, y, epochs=120, batch=6, rng=0)
     pred = predict_pointnet(model, x)
     assert np.abs(pred - y).mean() < 0.5  # learned the tiny training set
+
+
+def test_pointnet2_forward_shape():
+    import torch
+
+    from tda_shapes.ml.pointnet2 import PointNet2Classifier
+
+    model = PointNet2Classifier(n_classes=[2, 3, 2])
+    model.eval()
+    out = model(torch.randn(4, 96, 3))
+    assert isinstance(out, list) and len(out) == 3
+    assert [o.shape for o in out] == [(4, 2), (4, 3), (4, 2)]
+
+
+def test_pointnet2_trains_and_predicts():
+    from tda_shapes.ml.pointnet import predict_pointnet, train_pointnet
+
+    rng = np.random.default_rng(0)
+    clouds = [
+        Circle().sample(density=60, size=1.0, embed_dim=3, rng=rng),
+        Sphere().sample(density=60, size=1.0, embed_dim=3, rng=rng),
+        Disk().sample(density=60, size=1.0, embed_dim=3, rng=rng),
+        Annulus().sample(density=60, size=1.0, embed_dim=3, rng=rng),
+    ] * 3
+
+    class _DS:
+        pass
+
+    ds = _DS()
+    ds.clouds = clouds
+    ds.betti = np.array([(1, 1, 0), (1, 0, 1), (1, 0, 0), (1, 1, 0)] * 3, dtype=float)
+    x, y = pointnet_arrays(ds, n_points=96, rng=rng)
+    model = train_pointnet(x, y, epochs=5, batch=6, rng=0, arch="pointnet2")
+    pred = predict_pointnet(model, x)
+    assert pred.shape == y.shape
+    assert pred.dtype.kind == "i"
 
 
 # --- metrics ---------------------------------------------------------------
@@ -254,6 +292,7 @@ def test_run_benchmark_smoke():
     )
     assert set(results) == {
         "pointnet",
+        "pointnet++",
         "gudhi_rips",
         "gudhi_cech",
         "ripser_learned",

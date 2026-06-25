@@ -2,9 +2,12 @@
 
 Two methods are compared (see :mod:`tda_shapes.ml.benchmark`):
 
-* :mod:`tda_shapes.ml.pointnet` — a PointNet regressor that learns from raw coordinates.
+* :mod:`tda_shapes.ml.pointnet` — a PointNet classifier that learns from raw coordinates.
 * :mod:`tda_shapes.ml.ph` — single-parameter (Vietoris–Rips) persistent homology, both a
   learned feature model and a training-free "count long bars" baseline.
+
+Each Betti number is predicted as an independent categorical label (per-dimension
+multiclass classification).
 
 These submodules require the optional deps ``torch``, ``ripser`` and ``scikit-learn``;
 they are imported lazily so ``import tda_shapes`` stays lightweight.
