@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--points-ph",
         type=int,
-        default=256,
+        default=0,
         dest="n_points_ph",
         help="subsample size for persistent homology; 0 = use the full cloud",
     )
