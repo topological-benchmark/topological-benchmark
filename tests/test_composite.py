@@ -8,12 +8,20 @@ import numpy as np
 import pytest
 
 from tda_shapes import (
+    BACKGROUND_LABEL,
     CompositeDataset,
     make_composite_dataset,
     sample_composite,
 )
 from tda_shapes.composite import _pack_centers, _pack_centers_line
 from tda_shapes.shapes import Circle, Sphere
+
+
+def _box_volume(pts, margin=0.0):
+    """Volume of the (optionally padded) axis-aligned bounding box of ``pts``."""
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    extent = hi - lo
+    return float(np.prod(extent * (1.0 + 2.0 * margin)))
 
 DENSITY = 80.0
 
@@ -122,6 +130,94 @@ def test_make_composite_dataset_shapes():
     assert cds.shape_counts.shape[0] == 10
     assert (cds.shape_counts.sum(axis=1) == 3).all()
     assert cds.k == 3
+
+
+def test_background_default_adds_no_clutter():
+    scene = sample_composite(3, density=DENSITY, rng=11)
+    assert not (scene.component_labels == BACKGROUND_LABEL).any()
+
+
+def test_background_count_matches_density_times_volume():
+    bg_density = 1.5
+    scene = sample_composite(
+        3, density=DENSITY, noise=0.02, background_density=bg_density, rng=12
+    )
+    fg = scene.points[scene.component_labels != BACKGROUND_LABEL]
+    n_bg = int((scene.component_labels == BACKGROUND_LABEL).sum())
+    assert n_bg == round(bg_density * _box_volume(fg))
+
+
+def test_background_margin_enlarges_box_and_count():
+    bg_density = 1.5
+    scene = sample_composite(
+        3,
+        density=DENSITY,
+        noise=0.02,
+        background_density=bg_density,
+        background_margin=0.2,
+        rng=12,
+    )
+    fg = scene.points[scene.component_labels != BACKGROUND_LABEL]
+    n_bg = int((scene.component_labels == BACKGROUND_LABEL).sum())
+    assert n_bg == round(bg_density * _box_volume(fg, margin=0.2))
+
+
+def test_background_lies_within_padded_box():
+    margin = 0.1
+    scene = sample_composite(
+        3,
+        density=DENSITY,
+        noise=0.02,
+        background_density=2.0,
+        background_margin=margin,
+        rng=13,
+    )
+    is_bg = scene.component_labels == BACKGROUND_LABEL
+    fg, bg = scene.points[~is_bg], scene.points[is_bg]
+    assert len(bg) > 0
+    lo, hi = fg.min(axis=0), fg.max(axis=0)
+    pad = margin * (hi - lo)
+    assert (bg >= lo - pad - 1e-9).all()
+    assert (bg <= hi + pad + 1e-9).all()
+
+
+def test_background_leaves_shapes_and_labels_unchanged():
+    # Same seed, with and without clutter: the shape points and labels are
+    # identical and the clutter is appended (it is sampled last).
+    clean = sample_composite(3, density=DENSITY, noise=0.02, rng=14)
+    cluttered = sample_composite(
+        3, density=DENSITY, noise=0.02, background_density=2.0, rng=14
+    )
+    fg = cluttered.component_labels != BACKGROUND_LABEL
+    assert np.array_equal(clean.betti, cluttered.betti)
+    assert np.array_equal(clean.counts, cluttered.counts)
+    assert np.array_equal(clean.points, cluttered.points[fg])
+    assert np.array_equal(clean.component_labels, cluttered.component_labels[fg])
+
+
+def test_background_reproducible():
+    a = sample_composite(3, density=DENSITY, noise=0.02, background_density=2.0, rng=15)
+    b = sample_composite(3, density=DENSITY, noise=0.02, background_density=2.0, rng=15)
+    assert np.array_equal(a.points, b.points)
+    assert np.array_equal(a.component_labels, b.component_labels)
+
+
+def test_make_composite_dataset_background_grows_clouds():
+    # background_density is forwarded to each scene. The first scene shares the
+    # rng prefix with the clean run (clutter is drawn last), so its foreground is
+    # unchanged and only grows; later scenes diverge as the clutter draws advance
+    # the stream, so we only assert the total point count grows overall.
+    clean = make_composite_dataset(5, k=3, density=DENSITY, rng=16)
+    cluttered = make_composite_dataset(
+        5, k=3, density=DENSITY, background_density=2.0, rng=16
+    )
+    n0 = len(clean.clouds[0])
+    assert len(cluttered.clouds[0]) > n0
+    assert np.array_equal(cluttered.clouds[0][:n0], clean.clouds[0])
+    assert np.array_equal(cluttered.betti[0], clean.betti[0])
+    total_clean = sum(len(c) for c in clean.clouds)
+    total_cluttered = sum(len(c) for c in cluttered.clouds)
+    assert total_cluttered > total_clean
 
 
 def test_make_composite_dataset_save_load(tmp_path):

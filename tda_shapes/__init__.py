@@ -1,6 +1,7 @@
 """TDA shapes: sample labeled point clouds from shapes with known topology."""
 
 from .composite import (
+    BACKGROUND_LABEL,
     Composite,
     CompositeDataset,
     make_composite_dataset,
@@ -42,4 +43,5 @@ __all__ = [
     "CompositeDataset",
     "sample_composite",
     "make_composite_dataset",
+    "BACKGROUND_LABEL",
 ]

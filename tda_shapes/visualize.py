@@ -40,9 +40,13 @@ def plot_cloud(
 
     Works for 2-D and 3-D clouds. If ``ax`` is omitted a new figure/axis is
     created with the matching projection. If ``labels`` is given, points are
-    colored by label (e.g. per-component in a composite scene). Returns the axis.
+    colored by label (e.g. per-component in a composite scene); points labelled
+    :data:`~tda_shapes.composite.BACKGROUND_LABEL` are drawn as recessed grey
+    clutter behind the colored shapes. Returns the axis.
     """
     import matplotlib.pyplot as plt
+
+    from .composite import BACKGROUND_LABEL
 
     dim = pts.shape[1]
     if dim not in (2, 3):
@@ -54,6 +58,16 @@ def plot_cloud(
 
     kw = {"s": 6, "alpha": 0.6, "edgecolors": "none"}
     kw.update(scatter_kw)
+
+    # Split off background clutter so it renders as muted grey first and keeps the
+    # tab10 color scale clean for the real components.
+    bg_mask = labels == BACKGROUND_LABEL if labels is not None else None
+    if bg_mask is not None and bg_mask.any():
+        bg_kw = {**kw, "c": "0.7", "s": max(kw["s"] * 0.5, 1), "alpha": 0.25}
+        ax.scatter(*[pts[bg_mask, i] for i in range(dim)], **bg_kw)
+        fg = ~bg_mask
+        pts, labels = pts[fg], labels[fg]
+
     if labels is not None:
         kw.setdefault("cmap", "tab10")
         kw["c"] = labels
@@ -127,12 +141,18 @@ def composite_gallery(
     density: float = 30.0,
     size_range: tuple[float, float] = (1.0, 2.0),
     noise: float = 0.02,
+    background_density: float = 0.0,
+    background_margin: float = 0.0,
     clearance: float = 0.5,
     rotate: bool = True,
     ncols: int = 3,
     rng: RngLike = None,
 ):
-    """Render ``n`` composite scenes (each with ``k`` shapes) colored by component."""
+    """Render ``n`` composite scenes (each with ``k`` shapes) colored by component.
+
+    ``background_density`` > 0 scatters uniform grey background clutter through
+    each scene (see :func:`~tda_shapes.composite.sample_composite`).
+    """
     import matplotlib.pyplot as plt
 
     from .composite import sample_composite
@@ -148,6 +168,8 @@ def composite_gallery(
             density=density,
             size_range=size_range,
             noise=noise,
+            background_density=background_density,
+            background_margin=background_margin,
             clearance=clearance,
             rotate=rotate,
             rng=rng,
@@ -190,6 +212,14 @@ def main(argv: list[str] | None = None) -> None:
         metavar="K",
         help="render a gallery of composite scenes, each containing K shapes",
     )
+    parser.add_argument(
+        "--background",
+        type=float,
+        default=0.0,
+        metavar="DENSITY",
+        help="composite only: uniform background clutter, in points per unit volume "
+        "(pick well below --density); 0 disables",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=str, default="shapes_gallery.png")
     parser.add_argument("--show", action="store_true", help="open an interactive window")
@@ -203,7 +233,11 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.composite is not None:
         fig = composite_gallery(
-            args.composite, density=args.density, noise=args.noise, rng=args.seed
+            args.composite,
+            density=args.density,
+            noise=args.noise,
+            background_density=args.background,
+            rng=args.seed,
         )
     else:
         fig = gallery(
