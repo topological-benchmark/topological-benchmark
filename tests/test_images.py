@@ -75,6 +75,13 @@ def test_rasterize_rejects_unknown_backend():
         rasterize_kde(points, resolution=16, bandwidth=0.25, backend=cast(Any, "bogus"))
 
 
+def test_rasterize_gpu_backend_matches_numpy_or_falls_back():
+    points = Circle().sample(density=40.0, size=1.0, embed_dim=3, rng=4)
+    numpy_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend="numpy")
+    gpu_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend="gpu")
+    assert np.max(np.abs(numpy_image - gpu_image)) < 1e-4
+
+
 @pytest.mark.parametrize("backend", ["mps", "cuda"])
 def test_rasterize_accelerator_matches_numpy_when_available(backend):
     jax = pytest.importorskip("jax")

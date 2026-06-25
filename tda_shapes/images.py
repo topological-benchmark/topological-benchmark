@@ -10,7 +10,7 @@ import numpy as np
 from .noise import PointNoiseKind
 from .shapes import DEFAULT_SHAPES, RngLike, Shape
 
-ImageBackend = Literal["numpy", "jax", "mps", "cuda"]
+ImageBackend = Literal["numpy", "gpu", "jax", "mps", "cuda"]
 _JAX_DENSITY_CHUNK = None
 
 
@@ -111,6 +111,8 @@ def rasterize_kde(
 
     if backend == "numpy":
         density = _kde_density_numpy(points, center, radius, resolution, bandwidth)
+    elif backend == "gpu":
+        density = _kde_density_gpu_or_numpy(points, center, radius, resolution, bandwidth)
     elif backend in {"jax", "mps", "cuda"}:
         density = _kde_density_jax(points, center, radius, resolution, bandwidth, backend)
     else:
@@ -183,6 +185,27 @@ def _kde_density_jax(
             _JAX_DENSITY_CHUNK(chunk, pts, point_norms, h2)
         )
     return density
+
+
+def _kde_density_gpu_or_numpy(
+    points: np.ndarray,
+    center: np.ndarray,
+    radius: float,
+    resolution: int,
+    bandwidth: float,
+) -> np.ndarray:
+    try:
+        import jax
+    except ImportError:
+        return _kde_density_numpy(points, center, radius, resolution, bandwidth)
+
+    for backend in ("mps", "cuda"):
+        try:
+            if _jax_devices(jax, backend):
+                return _kde_density_jax(points, center, radius, resolution, bandwidth, backend)
+        except RuntimeError:
+            pass
+    return _kde_density_numpy(points, center, radius, resolution, bandwidth)
 
 
 def _jax_devices(jax, backend: ImageBackend):
