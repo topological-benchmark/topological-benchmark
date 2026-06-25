@@ -25,15 +25,27 @@ class ImageDataset:
 
     def save(self, path: str) -> None:
         """Save to a ``.npz`` file."""
-        data = {
-            "images": self.images,
-            "labels": self.labels,
-            "label_names": np.array(self.label_names, dtype=object),
-            "betti": self.betti,
-        }
-        if self.clouds is not None:
-            data["clouds"] = np.array(self.clouds, dtype=object)
-        np.savez(path, **data)
+        label_names = np.array(self.label_names, dtype=object)
+        if self.clouds is None:
+            np.savez(
+                path,
+                images=self.images,
+                labels=self.labels,
+                label_names=label_names,
+                betti=self.betti,
+            )
+        else:
+            clouds = np.empty(len(self.clouds), dtype=object)
+            for i, cloud in enumerate(self.clouds):
+                clouds[i] = cloud
+            np.savez(
+                path,
+                images=self.images,
+                labels=self.labels,
+                label_names=label_names,
+                betti=self.betti,
+                clouds=clouds,
+            )
 
     @classmethod
     def load(cls, path: str) -> "ImageDataset":
@@ -95,11 +107,16 @@ def rasterize_kde(
     axes = [np.linspace(c - radius, c + radius, resolution) for c in center]
     grid = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
     density = np.empty(len(grid), dtype=float)
+    point_norms = np.sum(points**2, axis=1)
     h2 = bandwidth * bandwidth
-    batch = 8192
+    batch = max(1, min(8192, 2_000_000 // len(points)))
     for start in range(0, len(grid), batch):
         chunk = grid[start : start + batch]
-        dist2 = np.sum((chunk[:, None, :] - points[None, :, :]) ** 2, axis=2)
+        dist2 = (
+            np.sum(chunk**2, axis=1)[:, None]
+            + point_norms[None, :]
+            - 2.0 * chunk @ points.T
+        )
         density[start : start + batch] = np.exp(-0.5 * dist2 / h2).sum(axis=1)
 
     image = density.reshape((resolution, resolution, resolution))
@@ -176,10 +193,16 @@ def make_image_dataset(
             labels.append(label)
             betti.append(shape.betti)
 
+    image_array = (
+        np.stack(images)
+        if images
+        else np.empty((0, resolution, resolution, resolution), dtype=np.float32)
+    )
+    betti_array = np.array(betti, dtype=int).reshape((-1, 3))
     return ImageDataset(
-        images=np.stack(images),
+        images=image_array,
         labels=np.array(labels, dtype=int),
         label_names=label_names,
-        betti=np.array(betti, dtype=int),
+        betti=betti_array,
         clouds=clouds if keep_clouds else None,
     )
