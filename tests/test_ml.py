@@ -101,6 +101,7 @@ def test_gudhi_pipeline_fits_point_clouds():
     ]
     y = np.array([(1, 1, 0), (1, 0, 0), (1, 0, 1), (1, 1, 0)])
     model = gudhi_betti_pipeline(n_points=48, grid=8, n_estimators=5, random_state=0)
+    assert "clouds" in model.named_steps
     pred = model.fit(clouds, y).predict(clouds)
     assert pred.shape == y.shape
     assert pred.dtype.kind == "i"
@@ -177,6 +178,7 @@ def test_cubical_pipeline_fits_images():
     model = cubical_betti_pipeline(
         homology_dimensions=(0, 1), grid=8, n_estimators=5, random_state=0
     )
+    assert "images" in model.named_steps
     pred = model.fit(ds.images, ds.betti).predict(ds.images)
     assert pred.shape == ds.betti.shape
     assert pred.dtype.kind == "i"

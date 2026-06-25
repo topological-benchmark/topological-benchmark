@@ -297,6 +297,7 @@ def _gudhi_diagram_pipeline(
     persistence,
     *,
     preprocessor,
+    preprocessor_name: str,
     homology_dimensions: tuple[int, ...],
     representation: GudhiRepresentation,
     grid: int,
@@ -365,7 +366,7 @@ def _gudhi_diagram_pipeline(
 
     return Pipeline(
         [
-            ("preprocess", preprocessor),
+            (preprocessor_name, preprocessor),
             ("persistence", persistence),
             ("features", FeatureUnion(branches)),
             (
@@ -401,6 +402,7 @@ def gudhi_betti_pipeline(
             n_jobs=n_jobs,
         ),
         preprocessor=PointCloudPreprocessor(n_points=n_points, random_state=random_state),
+        preprocessor_name="clouds",
         homology_dimensions=homology_dimensions,
         representation=representation,
         grid=grid,
@@ -433,6 +435,7 @@ def cech_betti_pipeline(
             n_jobs=n_jobs,
         ),
         preprocessor=PointCloudPreprocessor(n_points=n_points, random_state=random_state),
+        preprocessor_name="clouds",
         homology_dimensions=homology_dimensions,
         representation=representation,
         grid=grid,
@@ -464,6 +467,7 @@ def cubical_betti_pipeline(
             n_jobs=n_jobs,
         ),
         preprocessor=ImagePreprocessor(),
+        preprocessor_name="images",
         homology_dimensions=homology_dimensions,
         representation=representation,
         grid=grid,
