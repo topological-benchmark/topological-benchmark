@@ -31,10 +31,10 @@ RngLike = int | np.random.Generator | None
 def _prepare_cloud(
     cloud: np.ndarray, *, n_points: int | None, rng: np.random.Generator
 ) -> np.ndarray:
-    pts = normalize_cloud(cloud)
+    pts = np.asarray(cloud, dtype=np.float64)
     if n_points is not None and len(pts) != n_points:
         pts = to_fixed_size(pts, n_points, rng)
-    return pts
+    return normalize_cloud(pts)
 
 
 class PointCloudPreprocessor(BaseEstimator, TransformerMixin):

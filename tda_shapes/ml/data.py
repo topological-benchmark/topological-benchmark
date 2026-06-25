@@ -18,7 +18,7 @@ def normalize_cloud(pts: np.ndarray) -> np.ndarray:
     rms = np.sqrt((pts**2).sum(axis=1).mean())
     if rms > 0:
         pts = pts / rms
-    return pts
+    return np.ascontiguousarray(pts, dtype=np.float64)
 
 
 def to_fixed_size(pts: np.ndarray, p: int, rng: np.random.Generator) -> np.ndarray:
@@ -45,8 +45,8 @@ def pointnet_arrays(
     rng = np.random.default_rng(rng)
     x = np.empty((len(dataset.clouds), n_points, 3), dtype=np.float32)
     for i, cloud in enumerate(dataset.clouds):
-        pts = normalize_cloud(cloud)
-        x[i] = to_fixed_size(pts, n_points, rng).astype(np.float32)
+        pts = to_fixed_size(np.asarray(cloud, dtype=np.float64), n_points, rng)
+        x[i] = normalize_cloud(pts).astype(np.float32)
     y = np.asarray(dataset.betti, dtype=np.float32)
     return x, y
 
