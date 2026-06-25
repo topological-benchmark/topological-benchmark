@@ -10,7 +10,7 @@ import numpy as np
 from .noise import PointNoiseKind
 from .shapes import DEFAULT_SHAPES, RngLike, Shape
 
-ImageBackend = Literal["numpy", "jax", "mps"]
+ImageBackend = Literal["numpy", "jax", "mps", "cuda"]
 _JAX_DENSITY_CHUNK = None
 
 
@@ -111,7 +111,7 @@ def rasterize_kde(
 
     if backend == "numpy":
         density = _kde_density_numpy(points, center, radius, resolution, bandwidth)
-    elif backend in {"jax", "mps"}:
+    elif backend in {"jax", "mps", "cuda"}:
         density = _kde_density_jax(points, center, radius, resolution, bandwidth, backend)
     else:
         raise ValueError(f"unknown image backend: {backend!r}")
@@ -160,9 +160,9 @@ def _kde_density_jax(
     try:
         import jax
     except ImportError as exc:
-        raise ImportError("backend='jax'/'mps' requires jax in the active environment") from exc
+        raise ImportError("backend='jax'/'mps'/'cuda' requires jax in the active environment") from exc
 
-    devices = jax.devices("mps") if backend == "mps" else jax.devices()
+    devices = _jax_devices(jax, backend)
     if not devices:
         raise RuntimeError(f"no JAX devices for backend={backend!r}")
     device = devices[0]
@@ -183,6 +183,17 @@ def _kde_density_jax(
             _JAX_DENSITY_CHUNK(chunk, pts, point_norms, h2)
         )
     return density
+
+
+def _jax_devices(jax, backend: ImageBackend):
+    if backend == "jax":
+        return jax.devices()
+    if backend == "cuda":
+        try:
+            return jax.devices("cuda")
+        except RuntimeError:
+            return jax.devices("gpu")
+    return jax.devices(backend)
 
 
 def _kde_density_chunk_jax(chunk, pts, point_norms, h2):

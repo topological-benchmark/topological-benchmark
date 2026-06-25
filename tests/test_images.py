@@ -75,16 +75,26 @@ def test_rasterize_rejects_unknown_backend():
         rasterize_kde(points, resolution=16, bandwidth=0.25, backend=cast(Any, "bogus"))
 
 
-def test_rasterize_mps_matches_numpy_when_available():
+@pytest.mark.parametrize("backend", ["mps", "cuda"])
+def test_rasterize_accelerator_matches_numpy_when_available(backend):
     jax = pytest.importorskip("jax")
-    try:
-        jax.devices("mps")
-    except RuntimeError:
-        pytest.skip("JAX MPS backend unavailable")
+    if backend == "cuda":
+        try:
+            jax.devices("cuda")
+        except RuntimeError:
+            try:
+                jax.devices("gpu")
+            except RuntimeError:
+                pytest.skip("JAX CUDA backend unavailable")
+    else:
+        try:
+            jax.devices(backend)
+        except RuntimeError:
+            pytest.skip(f"JAX {backend.upper()} backend unavailable")
     points = Circle().sample(density=40.0, size=1.0, embed_dim=3, rng=4)
     numpy_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend="numpy")
-    mps_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend="mps")
-    assert np.max(np.abs(numpy_image - mps_image)) < 1e-4
+    device_image = rasterize_kde(points, resolution=16, bandwidth=0.25, backend=cast(Any, backend))
+    assert np.max(np.abs(numpy_image - device_image)) < 1e-4
 
 
 def test_default_relative_bandwidth_has_cubical_h1_signal():
