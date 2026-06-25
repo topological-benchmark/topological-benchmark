@@ -7,8 +7,8 @@ diagrams up to H2. From the diagrams we build:
 * a feature vector (:func:`diagram_features`) — per-dimension Betti curves plus
   persistence statistics — fed to a learned :class:`PHRegressor`.
 
-GUDHI's scikit-learn API is exposed through :func:`gudhi_betti_pipeline` and
-:func:`cech_betti_pipeline` for native point-cloud ``Pipeline`` objects.
+GUDHI's scikit-learn API is exposed through :func:`gudhi_betti_pipeline`,
+:func:`cech_betti_pipeline`, and :func:`cubical_betti_pipeline`.
 
 Filtration values are normalized per cloud (divided by the largest finite death) so
 features and thresholds are comparable across clouds of different scale.
@@ -62,6 +62,16 @@ class PointCloudPreprocessor(BaseEstimator, TransformerMixin):
     def transform(self, X):
         rng = np.random.default_rng(self.random_state)
         return [_prepare_cloud(c, n_points=self.n_points, rng=rng) for c in X]
+
+
+class ImagePreprocessor(BaseEstimator, TransformerMixin):
+    """Convert raster images to float arrays for GUDHI CubicalPersistence."""
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return [np.asarray(image, dtype=np.float64) for image in X]
 
 
 class RipserFeatures(BaseEstimator, TransformerMixin):
@@ -286,7 +296,7 @@ def ripser_betti_pipeline(
 def _gudhi_diagram_pipeline(
     persistence,
     *,
-    n_points: int | None,
+    preprocessor,
     homology_dimensions: tuple[int, ...],
     representation: GudhiRepresentation,
     grid: int,
@@ -355,10 +365,7 @@ def _gudhi_diagram_pipeline(
 
     return Pipeline(
         [
-            (
-                "clouds",
-                PointCloudPreprocessor(n_points=n_points, random_state=random_state),
-            ),
+            ("preprocess", preprocessor),
             ("persistence", persistence),
             ("features", FeatureUnion(branches)),
             (
@@ -393,7 +400,7 @@ def gudhi_betti_pipeline(
             threshold=threshold,
             n_jobs=n_jobs,
         ),
-        n_points=n_points,
+        preprocessor=PointCloudPreprocessor(n_points=n_points, random_state=random_state),
         homology_dimensions=homology_dimensions,
         representation=representation,
         grid=grid,
@@ -425,7 +432,38 @@ def cech_betti_pipeline(
             threshold=threshold,
             n_jobs=n_jobs,
         ),
-        n_points=n_points,
+        preprocessor=PointCloudPreprocessor(n_points=n_points, random_state=random_state),
+        homology_dimensions=homology_dimensions,
+        representation=representation,
+        grid=grid,
+        n_estimators=n_estimators,
+        random_state=random_state,
+        n_jobs=n_jobs,
+    )
+
+
+def cubical_betti_pipeline(
+    *,
+    homology_dimensions: tuple[int, ...] = (0, 1, 2),
+    input_type: Literal["top_dimensional_cells", "vertices"] = "top_dimensional_cells",
+    min_persistence: float = 0.0,
+    representation: GudhiRepresentation = "betti",
+    grid: int = 32,
+    n_estimators: int = 300,
+    random_state: int = 0,
+    n_jobs: int | None = -1,
+) -> Pipeline:
+    """Image scikit-learn pipeline backed by GUDHI's CubicalPersistence."""
+    from gudhi.sklearn import CubicalPersistence
+
+    return _gudhi_diagram_pipeline(
+        CubicalPersistence(
+            homology_dimensions=homology_dimensions,
+            input_type=input_type,
+            min_persistence=min_persistence,
+            n_jobs=n_jobs,
+        ),
+        preprocessor=ImagePreprocessor(),
         homology_dimensions=homology_dimensions,
         representation=representation,
         grid=grid,

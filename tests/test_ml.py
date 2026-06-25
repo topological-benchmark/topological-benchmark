@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tda_shapes import Annulus, Circle, Disk, Sphere
+from tda_shapes import Annulus, Circle, Disk, Sphere, make_image_dataset
 from tda_shapes.ml.data import normalize_cloud, pointnet_arrays, to_fixed_size
 from tda_shapes.ml.metrics import betti_metrics
 
@@ -158,6 +158,27 @@ def test_cech_pipeline_fits_point_clouds():
     model = cech_betti_pipeline(n_points=32, grid=8, n_estimators=5, random_state=0)
     pred = model.fit(clouds, y).predict(clouds)
     assert pred.shape == y.shape
+    assert pred.dtype.kind == "i"
+
+
+def test_cubical_pipeline_fits_images():
+    pytest.importorskip("gudhi")
+    from tda_shapes.ml.ph import cubical_betti_pipeline
+
+    ds = make_image_dataset(
+        [Circle(), Disk(), Sphere(), Annulus()],
+        n_per_class=1,
+        density=40.0,
+        size_range=(1.0, 1.0),
+        resolution=18,
+        bandwidth=0.25,
+        rng=0,
+    )
+    model = cubical_betti_pipeline(
+        homology_dimensions=(0, 1), grid=8, n_estimators=5, random_state=0
+    )
+    pred = model.fit(ds.images, ds.betti).predict(ds.images)
+    assert pred.shape == ds.betti.shape
     assert pred.dtype.kind == "i"
 
 
