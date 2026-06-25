@@ -60,6 +60,9 @@ def _smooth_vector_field(
     points = np.asarray(points, dtype=np.float64)
     if len(points) == 0:
         return np.zeros_like(points)
+    diameter = float(np.linalg.norm(points.max(axis=0) - points.min(axis=0)))
+    if diameter == 0.0 or length_scale > 1000.0 * diameter:
+        return np.zeros_like(points)
     n_features = max(int(n_features), 1)
     w = rng.normal(scale=1.0 / length_scale, size=(n_features, points.shape[1]))
     phase = rng.uniform(0.0, 2.0 * np.pi, size=(n_features, points.shape[1]))
@@ -72,5 +75,5 @@ def _smooth_vector_field(
         vals = factor * (shifted @ weights[:, axis])
         vals = vals - vals.mean()
         std = float(vals.std())
-        disp[:, axis] = vals / std if std > 1e-12 else vals
+        disp[:, axis] = vals / std if std > 1e-6 else vals
     return amplitude * disp

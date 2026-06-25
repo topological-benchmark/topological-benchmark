@@ -194,6 +194,7 @@ def test_field_noise_does_not_add_rigid_translation():
         field_length_scale=1e6,
     )
     assert np.allclose((noisy - points).mean(axis=0), 0.0, atol=1e-10)
+    assert np.sqrt(((noisy - points) ** 2).mean()) < 1e-6
 
 
 # --- filled ball -----------------------------------------------------------
