@@ -5,6 +5,7 @@ description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.11.0",
+    "gudhi>=3.10.0",
     "numpy>=2.4.6",
     "ripser>=0.6.15",
     "scikit-learn>=1.9.0",
