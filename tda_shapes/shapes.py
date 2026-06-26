@@ -29,7 +29,7 @@ from .noise import PointNoiseKind, apply_noise
 
 Betti = tuple[int, int, int]
 RngLike = int | np.random.Generator | None
-StretchLike = "float | tuple[float, ...] | np.ndarray | None"
+StretchLike = float | tuple[float, ...] | np.ndarray | None
 
 # Pilot sample size used to estimate the stretched measure of a surface/curve.
 _PILOT = 4096
