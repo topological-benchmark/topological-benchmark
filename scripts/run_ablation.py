@@ -3,6 +3,7 @@
 Examples:
     uv run python scripts/run_ablation.py --stage smoke
     uv run python scripts/run_ablation.py --stage smart --out outputs/smart.csv
+    uv run python scripts/run_ablation.py --stage k --jobs 4 --out outputs/k.csv
     uv run python scripts/run_ablation.py --stage main --out outputs/main.csv
     uv run python scripts/run_ablation.py --stage representations --limit 3
 """
@@ -173,6 +174,19 @@ def _stage_configs(stage: str):
             seed=[0, 1, 2],
         )
         noise = _noise_grid([0.02], [0.01], [0.25])
+    elif stage == "k":
+        base = _product(
+            "k",
+            sweep=["k"],
+            k=[1, 2, 3, 5, 10],
+            n_samples=[120],
+            points_net=[256],
+            points_ph=[128],
+            image_resolution=[24],
+            representation=["silhouette"],
+            seed=[0],
+        )
+        noise = _noise_grid([0.02], [0.01], [0.25])
     elif stage == "smart":
         yield from _smart_configs()
         return
@@ -282,6 +296,37 @@ def _append_rows(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def _run_one(i: int, total: int, cfg: dict[str, Any], verbose: bool) -> tuple[int, str, list[dict[str, Any]], str]:
+    run_id = _run_id(cfg)
+    start = time.perf_counter()
+    try:
+        results = run_benchmark(
+            k=cfg["k"],
+            n_samples=cfg["n_samples"],
+            point_noise=cfg["point_noise"],
+            field_noise=cfg["field_noise"],
+            field_length_scale=cfg["field_length_scale"],
+            n_points_net=cfg["points_net"],
+            n_points_ph=cfg["points_ph"],
+            representation=cfg["representation"],
+            run_rips=cfg["run_rips"],
+            run_cubical=cfg["run_cubical"],
+            image_resolution=cfg["image_resolution"],
+            image_backend=cfg["image_backend"],
+            image_min_pixels_per_bandwidth=cfg["image_min_pixels_per_bandwidth"],
+            epochs=cfg["epochs"],
+            val_frac=cfg["val_frac"],
+            seed=cfg["seed"],
+            verbose=verbose,
+        )
+        wall = time.perf_counter() - start
+        return i, "ok", _metric_rows(run_id, cfg, results, wall), f"[{i}/{total}] ok {wall:.1f}s"
+    except Exception as exc:  # noqa: BLE001 - long ablations should continue.
+        wall = time.perf_counter() - start
+        rows = [_row(run_id, cfg, "ERROR", wall, "error", repr(exc))]
+        return i, "error", rows, f"[{i}/{total}] error {type(exc).__name__}: {exc}"
+
+
 def run(args: argparse.Namespace) -> None:
     out = args.out or Path(f"outputs/ablation_{datetime.now():%Y%m%d_%H%M%S}.csv")
     configs = []
@@ -299,54 +344,40 @@ def run(args: argparse.Namespace) -> None:
     print(f"writing {out}")
     print(f"configs {total}; already complete {sum(_run_id(c) in done for c in configs)}")
 
+    pending = []
     for i, cfg in enumerate(configs, start=1):
         run_id = _run_id(cfg)
         if run_id in done and not args.rerun:
             print(f"[{i}/{total}] skip {run_id}")
             continue
-        print(f"[{i}/{total}] run {run_id}")
-        start = time.perf_counter()
-        try:
-            results = run_benchmark(
-                k=cfg["k"],
-                n_samples=cfg["n_samples"],
-                point_noise=cfg["point_noise"],
-                field_noise=cfg["field_noise"],
-                field_length_scale=cfg["field_length_scale"],
-                n_points_net=cfg["points_net"],
-                n_points_ph=cfg["points_ph"],
-                representation=cfg["representation"],
-                run_rips=cfg["run_rips"],
-                run_cubical=cfg["run_cubical"],
-                image_resolution=cfg["image_resolution"],
-                image_backend=cfg["image_backend"],
-                image_min_pixels_per_bandwidth=cfg["image_min_pixels_per_bandwidth"],
-                epochs=cfg["epochs"],
-                val_frac=cfg["val_frac"],
-                seed=cfg["seed"],
-                verbose=args.verbose,
-            )
-            wall = time.perf_counter() - start
-            _append_rows(out, _metric_rows(run_id, cfg, results, wall))
-            done.add(run_id)
-            print(f"[{i}/{total}] ok {wall:.1f}s")
-        except Exception as exc:  # noqa: BLE001 - long ablations should continue.
-            wall = time.perf_counter() - start
-            _append_rows(out, [_row(run_id, cfg, "ERROR", wall, "error", repr(exc))])
-            print(f"[{i}/{total}] error {type(exc).__name__}: {exc}")
-            if args.stop_on_error:
-                raise
+        pending.append((i, cfg))
+
+    if args.jobs == 1:
+        results = [_run_one(i, total, cfg, args.verbose) for i, cfg in pending]
+    else:
+        from joblib import Parallel, delayed
+
+        results = Parallel(n_jobs=args.jobs)(
+            delayed(_run_one)(i, total, cfg, args.verbose) for i, cfg in pending
+        )
+
+    for _, status, rows, message in sorted(results):
+        _append_rows(out, rows)
+        print(message)
+        if status == "error" and args.stop_on_error:
+            raise RuntimeError(rows[0]["error"])
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--stage",
-        choices=("smoke", "smart", "main", "representations", "all"),
+        choices=("smoke", "smart", "k", "main", "representations", "all"),
         default="smoke",
     )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--stop-on-error", action="store_true")
     parser.add_argument("--epochs", type=int, default=5)
