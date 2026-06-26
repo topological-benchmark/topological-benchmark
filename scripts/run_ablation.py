@@ -2,6 +2,7 @@
 
 Examples:
     uv run python scripts/run_ablation.py --stage smoke
+    uv run python scripts/run_ablation.py --stage smart --out outputs/smart.csv
     uv run python scripts/run_ablation.py --stage main --out outputs/main.csv
     uv run python scripts/run_ablation.py --stage representations --limit 3
 """
@@ -90,13 +91,13 @@ def _baseline(**overrides) -> dict[str, Any]:
         "stage": "smart",
         "sweep": "baseline",
         "k": 3,
-        "n_samples": 300,
-        "points_net": 1000,
-        "points_ph": 512,
+        "n_samples": 120,
+        "points_net": 256,
+        "points_ph": 128,
         "point_noise": 0.02,
         "field_noise": 0.01,
         "field_length_scale": 0.25,
-        "image_resolution": 32,
+        "image_resolution": 24,
         "representation": "silhouette",
         "seed": 0,
     }
@@ -113,25 +114,25 @@ def _smart_configs():
             seen.add(key)
             yield cfg
 
-    for seed in [0, 1, 2]:
+    for seed in [0, 1]:
         yield from emit(_baseline(sweep="seed", seed=seed))
 
-    for noise in _noise_grid([0.0, 0.02, 0.05], [0.0, 0.01, 0.03], [0.15, 0.25, 0.5]):
+    for noise in _noise_grid([0.0, 0.02, 0.05], [0.0, 0.01], [0.25]):
         yield from emit(_baseline(sweep="noise", **noise))
 
-    for k in [1, 3, 10]:
+    for k in [1, 3]:
         yield from emit(_baseline(sweep="k", k=k))
 
-    for points_net in [128, 256, 1000]:
+    for points_net in [128, 256]:
         yield from emit(_baseline(sweep="points_net", points_net=points_net))
 
-    for points_ph in [128, 512, 1000]:
+    for points_ph in [128, 256]:
         yield from emit(_baseline(sweep="points_ph", points_ph=points_ph))
 
-    for image_resolution in [24, 32, 50, 100]:
+    for image_resolution in [24, 32]:
         yield from emit(_baseline(sweep="image_resolution", image_resolution=image_resolution))
 
-    for representation in REPRESENTATIONS:
+    for representation in ["silhouette", "betti"]:
         yield from emit(_baseline(sweep="representation", representation=representation))
 
 
@@ -195,7 +196,7 @@ def _effective_cfg(cfg: dict[str, Any], args: argparse.Namespace) -> dict[str, A
     out["image_resolution"] = args.image_resolution or cfg["image_resolution"]
     out["image_backend"] = args.image_backend
     out["image_min_pixels_per_bandwidth"] = args.image_min_pixels_per_bandwidth
-    out["run_rips"] = not args.no_rips
+    out["run_rips"] = args.run_rips
     out["run_cubical"] = not args.no_cubical
     out["epochs"] = args.epochs
     out["val_frac"] = args.val_frac
@@ -348,13 +349,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--stop-on-error", action="store_true")
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument("--n-samples", type=int, default=None)
     parser.add_argument("--image-resolution", type=int, default=None)
     parser.add_argument("--image-min-pixels-per-bandwidth", type=float, default=1.0)
     parser.add_argument("--image-backend", choices=("numpy", "gpu", "jax", "mps", "cuda"), default="gpu")
-    parser.add_argument("--no-rips", action="store_true")
+    parser.add_argument("--rips", action="store_true", dest="run_rips")
+    parser.add_argument("--no-rips", action="store_false", dest="run_rips")
     parser.add_argument("--no-cubical", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     run(parser.parse_args(argv))
