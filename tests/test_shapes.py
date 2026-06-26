@@ -13,6 +13,7 @@ from tda_shapes import (
     Circle,
     Disk,
     EntangledCircles,
+    KleinBottle,
     Sphere,
     Torus,
     TwoCircles,
@@ -123,6 +124,7 @@ def test_betti_numbers_are_ground_truth():
         "sphere": (1, 0, 1),
         "ball": (1, 0, 0),
         "torus": (1, 2, 1),
+        "klein_bottle": (1, 1, 0),
     }
     for shape in DEFAULT_SHAPES:
         assert shape.betti == expected[shape.name]
@@ -149,6 +151,13 @@ def test_torus_theta_distribution_matches_area_density():
     cos_theta = (rho - 1.0) / 0.35
     outer = np.mean(cos_theta > 0)  # rim half
     assert outer > 0.5  # area-weighted toward the outer rim
+
+
+def test_klein_bottle_samples_finite_3d_surface():
+    pts = KleinBottle().sample(density=30.0, size=1.0, point_noise=0.0, rng=17)
+    assert pts.shape == (KleinBottle().expected_n(30.0), 3)
+    assert np.isfinite(pts).all()
+    assert np.ptp(pts[:, 2]) > 1.0
 
 
 def test_embed_dim_pads_planar_shapes_into_3d():

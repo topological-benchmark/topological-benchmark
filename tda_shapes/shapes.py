@@ -471,6 +471,108 @@ class Torus(Shape):
 
 
 @dataclass
+class KleinBottle(Shape):
+    """Standard immersed Klein bottle in 3-D. Betti (1, 1, 0) over odd fields."""
+
+    radius: float = 2.0
+    name: str = "klein_bottle"
+    intrinsic_dim: int = 2
+    native_dim: int = 3
+    betti: Betti = (1, 1, 0)
+
+    def __post_init__(self) -> None:
+        if self.radius <= 0.0:
+            raise ValueError("radius must be positive")
+
+    def unit_measure(self) -> float:
+        return _klein_measure(np.ones(3), self.radius)
+
+    def _sample_unit(self, n: int, rng: np.random.Generator) -> np.ndarray:
+        u, v = _sample_klein_uv(n, np.ones(3), self.radius, rng)
+        return _klein_points(u, v, self.radius)
+
+    def _sample_anisotropic(
+        self, density: float, scale: np.ndarray, rng: np.random.Generator
+    ) -> np.ndarray:
+        measure = _klein_measure(scale, self.radius)
+        n = int(round(density * measure))
+        u, v = _sample_klein_uv(n, scale, self.radius, rng)
+        return _klein_points(u, v, self.radius) * scale
+
+
+def _klein_points(u: np.ndarray, v: np.ndarray, radius: float) -> np.ndarray:
+    a = 0.5 * u
+    s = radius + np.cos(a) * np.sin(v) - np.sin(a) * np.sin(2.0 * v)
+    return np.column_stack(
+        (
+            s * np.cos(u),
+            s * np.sin(u),
+            np.sin(a) * np.sin(v) + np.cos(a) * np.sin(2.0 * v),
+        )
+    )
+
+
+def _klein_weight(
+    u: np.ndarray, v: np.ndarray, scale: np.ndarray, radius: float
+) -> np.ndarray:
+    a = 0.5 * u
+    s = radius + np.cos(a) * np.sin(v) - np.sin(a) * np.sin(2.0 * v)
+    ds_du = -0.5 * np.sin(a) * np.sin(v) - 0.5 * np.cos(a) * np.sin(2.0 * v)
+    ds_dv = np.cos(a) * np.cos(v) - 2.0 * np.sin(a) * np.cos(2.0 * v)
+
+    du = np.column_stack(
+        (
+            ds_du * np.cos(u) - s * np.sin(u),
+            ds_du * np.sin(u) + s * np.cos(u),
+            0.5 * np.cos(a) * np.sin(v) - 0.5 * np.sin(a) * np.sin(2.0 * v),
+        )
+    )
+    dv = np.column_stack(
+        (
+            ds_dv * np.cos(u),
+            ds_dv * np.sin(u),
+            np.sin(a) * np.cos(v) + 2.0 * np.cos(a) * np.cos(2.0 * v),
+        )
+    )
+    return np.linalg.norm(np.cross(du * scale, dv * scale), axis=1)
+
+
+def _klein_measure(scale: np.ndarray, radius: float) -> float:
+    grid = 160
+    t = (np.arange(grid) + 0.5) * (2.0 * pi / grid)
+    u, v = np.meshgrid(t, t, indexing="ij")
+    weight = _klein_weight(u.ravel(), v.ravel(), np.abs(scale), radius)
+    return (2.0 * pi) ** 2 * float(weight.mean())
+
+
+def _sample_klein_uv(
+    n: int, scale: np.ndarray, radius: float, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    if n <= 0:
+        return np.empty(0), np.empty(0)
+    scale = np.abs(scale)
+    grid = 96
+    t = (np.arange(grid) + 0.5) * (2.0 * pi / grid)
+    uu, vv = np.meshgrid(t, t, indexing="ij")
+    bound = 1.05 * float(_klein_weight(uu.ravel(), vv.ravel(), scale, radius).max())
+    if bound == 0.0:
+        return np.empty(0), np.empty(0)
+
+    kept_u: list[np.ndarray] = []
+    kept_v: list[np.ndarray] = []
+    got = 0
+    while got < n:
+        m = 2 * (n - got) + 32
+        u = rng.uniform(0.0, 2.0 * pi, size=m)
+        v = rng.uniform(0.0, 2.0 * pi, size=m)
+        accept = rng.uniform(0.0, 1.0, size=m) < _klein_weight(u, v, scale, radius) / bound
+        kept_u.append(u[accept])
+        kept_v.append(v[accept])
+        got += int(np.count_nonzero(accept))
+    return np.concatenate(kept_u)[:n], np.concatenate(kept_v)[:n]
+
+
+@dataclass
 class Ball(Shape):
     """Filled unit ball B^3 in 3-D (a solid sphere). Betti (1, 0, 0)."""
 
@@ -501,6 +603,7 @@ def default_shapes() -> list[Shape]:
         Sphere(),
         Ball(),
         Torus(),
+        KleinBottle(),
     ]
 
 
