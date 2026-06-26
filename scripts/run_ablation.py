@@ -199,7 +199,7 @@ def _stage_configs(stage: str):
 
 
 def _configs(stage: str):
-    stages = ["smoke", "main", "representations"] if stage == "all" else [stage]
+    stages = ["smoke", "smart", "k", "main", "representations"] if stage == "all" else [stage]
     for name in stages:
         yield from _stage_configs(name)
 
@@ -343,6 +343,8 @@ def run(args: argparse.Namespace) -> None:
     total = len(configs)
     print(f"writing {out}")
     print(f"configs {total}; already complete {sum(_run_id(c) in done for c in configs)}")
+    if args.stop_on_error and args.jobs != 1:
+        raise ValueError("--stop-on-error requires --jobs 1")
 
     pending = []
     for i, cfg in enumerate(configs, start=1):
@@ -352,20 +354,24 @@ def run(args: argparse.Namespace) -> None:
             continue
         pending.append((i, cfg))
 
-    if args.jobs == 1:
-        results = [_run_one(i, total, cfg, args.verbose) for i, cfg in pending]
-    else:
-        from joblib import Parallel, delayed
-
-        results = Parallel(n_jobs=args.jobs)(
-            delayed(_run_one)(i, total, cfg, args.verbose) for i, cfg in pending
-        )
-
-    for _, status, rows, message in sorted(results):
+    def handle(result) -> None:
+        _, status, rows, message = result
         _append_rows(out, rows)
         print(message)
         if status == "error" and args.stop_on_error:
             raise RuntimeError(rows[0]["error"])
+
+    if args.jobs == 1:
+        for i, cfg in pending:
+            handle(_run_one(i, total, cfg, args.verbose))
+    else:
+        from joblib import Parallel, delayed
+
+        results = Parallel(n_jobs=args.jobs, return_as="generator_unordered")(
+            delayed(_run_one)(i, total, cfg, args.verbose) for i, cfg in pending
+        )
+        for result in results:
+            handle(result)
 
 
 def main(argv: list[str] | None = None) -> None:
