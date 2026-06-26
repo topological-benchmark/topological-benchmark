@@ -37,7 +37,12 @@ FIELDNAMES = [
     "field_length_scale",
     "image_resolution",
     "image_backend",
+    "image_min_pixels_per_bandwidth",
     "representation",
+    "run_rips",
+    "run_cubical",
+    "epochs",
+    "val_frac",
     "method",
     "acc_b0",
     "acc_b1",
@@ -189,6 +194,11 @@ def _effective_cfg(cfg: dict[str, Any], args: argparse.Namespace) -> dict[str, A
     out["n_samples"] = args.n_samples or cfg["n_samples"]
     out["image_resolution"] = args.image_resolution or cfg["image_resolution"]
     out["image_backend"] = args.image_backend
+    out["image_min_pixels_per_bandwidth"] = args.image_min_pixels_per_bandwidth
+    out["run_rips"] = not args.no_rips
+    out["run_cubical"] = not args.no_cubical
+    out["epochs"] = args.epochs
+    out["val_frac"] = args.val_frac
     return out
 
 
@@ -238,7 +248,12 @@ def _metric_rows(run_id: str, cfg: dict[str, Any], results: dict[str, dict], wal
 
 def _append_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    exists = path.exists()
+    exists = path.exists() and path.stat().st_size > 0
+    if exists:
+        with path.open(newline="") as f:
+            header = next(csv.reader(f), [])
+        if header != FIELDNAMES:
+            raise ValueError(f"CSV header mismatch in {path}; use a new --out path")
     with path.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         if not exists:
@@ -249,7 +264,13 @@ def _append_rows(path: Path, rows: list[dict[str, Any]]) -> None:
 def run(args: argparse.Namespace) -> None:
     out = args.out or Path(f"outputs/ablation_{datetime.now():%Y%m%d_%H%M%S}.csv")
     done = _completed(out)
-    configs = [_effective_cfg(c, args) for c in _configs(args.stage)]
+    configs = []
+    seen = set()
+    for cfg in (_effective_cfg(c, args) for c in _configs(args.stage)):
+        run_id = _run_id(cfg)
+        if run_id not in seen:
+            seen.add(run_id)
+            configs.append(cfg)
     if args.limit is not None:
         configs = configs[: args.limit]
     total = len(configs)
@@ -273,18 +294,19 @@ def run(args: argparse.Namespace) -> None:
                 n_points_net=cfg["points_net"],
                 n_points_ph=cfg["points_ph"],
                 representation=cfg["representation"],
-                run_rips=not args.no_rips,
-                run_cubical=not args.no_cubical,
+                run_rips=cfg["run_rips"],
+                run_cubical=cfg["run_cubical"],
                 image_resolution=cfg["image_resolution"],
                 image_backend=cfg["image_backend"],
-                image_min_pixels_per_bandwidth=args.image_min_pixels_per_bandwidth,
-                epochs=args.epochs,
-                val_frac=args.val_frac,
+                image_min_pixels_per_bandwidth=cfg["image_min_pixels_per_bandwidth"],
+                epochs=cfg["epochs"],
+                val_frac=cfg["val_frac"],
                 seed=cfg["seed"],
                 verbose=args.verbose,
             )
             wall = time.perf_counter() - start
             _append_rows(out, _metric_rows(run_id, cfg, results, wall))
+            done.add(run_id)
             print(f"[{i}/{total}] ok {wall:.1f}s")
         except Exception as exc:  # noqa: BLE001 - long ablations should continue.
             wall = time.perf_counter() - start

@@ -23,6 +23,10 @@ GROUPS = [
 ]
 
 
+def _cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else float("nan")
 
@@ -33,24 +37,30 @@ def _rows(path: Path) -> list[dict[str, str]]:
 
 
 def _table(headers: list[str], rows: list[list[str]]) -> str:
-    lines = ["| " + " | ".join(headers) + " |"]
+    lines = ["| " + " | ".join(_cell(h) for h in headers) + " |"]
     lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
-    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    lines.extend("| " + " | ".join(_cell(c) for c in row) + " |" for row in rows)
     return "\n".join(lines)
 
 
 def _summary(rows: list[dict[str, str]], group: str) -> str:
-    buckets: dict[str, list[dict[str, str]]] = defaultdict(list)
+    buckets: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         if row["status"] == "ok":
-            buckets[row.get(group, "")].append(row)
+            method = "" if group == "method" else row.get("method", "")
+            buckets[(row.get(group, ""), method)].append(row)
     out = []
-    for key, vals in sorted(buckets.items(), key=lambda item: str(item[0])):
+    for (key, method), vals in sorted(buckets.items(), key=lambda item: str(item[0])):
         exact = _mean([float(v["exact"]) for v in vals])
         mae = _mean([float(v["mae"]) for v in vals])
         wall = _mean([float(v["wall_time_s"]) for v in vals])
-        out.append([str(key), str(len(vals)), f"{exact:.3f}", f"{mae:.3f}", f"{wall:.1f}"])
-    return _table([group, "rows", "mean exact", "mean mae", "mean wall s"], out)
+        if group == "method":
+            out.append([str(key), str(len(vals)), f"{exact:.3f}", f"{mae:.3f}", f"{wall:.1f}"])
+        else:
+            out.append([str(key), method, str(len(vals)), f"{exact:.3f}", f"{mae:.3f}", f"{wall:.1f}"])
+    if group == "method":
+        return _table([group, "rows", "mean exact", "mean mae", "mean wall s"], out)
+    return _table([group, "method", "rows", "mean exact", "mean mae", "mean wall s"], out)
 
 
 def summarize(csv_path: Path) -> str:
