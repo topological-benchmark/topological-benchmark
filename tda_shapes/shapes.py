@@ -259,6 +259,79 @@ class TwoCircles(Shape):
 
 
 @dataclass
+class EntangledCircles(Shape):
+    """Two linked unit circles in 3-D (a Hopf link). Betti (2, 2, 0)."""
+
+    name: str = "entangled_circles"
+    intrinsic_dim: int = 1
+    native_dim: int = 3
+    betti: Betti = (2, 2, 0)
+
+    def unit_measure(self) -> float:
+        return 4.0 * pi  # two unit circles
+
+    def _sample_unit(self, n: int, rng: np.random.Generator) -> np.ndarray:
+        n_xy = rng.binomial(n, 0.5)
+
+        theta = rng.uniform(0.0, 2.0 * pi, size=n_xy)
+        xy = np.column_stack(
+            (np.cos(theta) - 0.5, np.sin(theta), np.zeros(n_xy))
+        )
+
+        phi = rng.uniform(0.0, 2.0 * pi, size=n - n_xy)
+        xz = np.column_stack(
+            (np.cos(phi) + 0.5, np.zeros(n - n_xy), np.sin(phi))
+        )
+        return np.vstack((xy, xz))
+
+    def _sample_anisotropic(
+        self, density: float, scale: np.ndarray, rng: np.random.Generator
+    ) -> np.ndarray:
+        sx, sy, sz = np.abs(scale)
+
+        def speed(theta: np.ndarray, a: float, b: float) -> np.ndarray:
+            return np.sqrt((a * np.sin(theta)) ** 2 + (b * np.cos(theta)) ** 2)
+
+        def length(a: float, b: float) -> float:
+            theta = rng.uniform(0.0, 2.0 * pi, size=_PILOT)
+            return 2.0 * pi * float(speed(theta, a, b).mean())
+
+        def angles(n: int, a: float, b: float) -> np.ndarray:
+            if n <= 0:
+                return np.empty(0)
+            bound = max(a, b)
+            if bound == 0.0:
+                return rng.uniform(0.0, 2.0 * pi, size=n)
+            kept: list[np.ndarray] = []
+            got = 0
+            while got < n:
+                cand = rng.uniform(0.0, 2.0 * pi, size=n - got + 16)
+                accept = (
+                    rng.uniform(0.0, 1.0, size=len(cand))
+                    < speed(cand, a, b) / bound
+                )
+                sel = cand[accept]
+                kept.append(sel)
+                got += len(sel)
+            return np.concatenate(kept)[:n]
+
+        xy_len = length(sx, sy)
+        xz_len = length(sx, sz)
+        n = int(round(density * (xy_len + xz_len)))
+        n_xy = rng.binomial(n, xy_len / (xy_len + xz_len)) if n else 0
+
+        theta = angles(n_xy, sx, sy)
+        xy = np.column_stack(
+            (np.cos(theta) - 0.5, np.sin(theta), np.zeros(n_xy))
+        )
+        phi = angles(n - n_xy, sx, sz)
+        xz = np.column_stack(
+            (np.cos(phi) + 0.5, np.zeros(n - n_xy), np.sin(phi))
+        )
+        return np.vstack((xy, xz)) * scale
+
+
+@dataclass
 class FigureEight(Shape):
     """Wedge of two unit circles meeting at the origin. Betti (1, 2, 0)."""
 
@@ -421,6 +494,7 @@ def default_shapes() -> list[Shape]:
     return [
         Circle(),
         TwoCircles(),
+        EntangledCircles(),
         FigureEight(),
         Disk(),
         Annulus(),

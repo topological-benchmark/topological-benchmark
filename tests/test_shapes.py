@@ -12,6 +12,7 @@ from tda_shapes import (
     Ball,
     Circle,
     Disk,
+    EntangledCircles,
     Sphere,
     Torus,
     TwoCircles,
@@ -93,10 +94,29 @@ def test_two_circles_split_into_two_components():
     assert right[:, 0].min() - left[:, 0].max() > 1.0
 
 
+def test_entangled_circles_are_linked_not_touching():
+    rng = np.random.default_rng(16)
+    pts = EntangledCircles().sample(
+        density=DENSITY, size=1.0, point_noise=0.0, rng=rng
+    )
+    xy = np.isclose(pts[:, 2], 0.0, atol=1e-9)
+    xz = np.isclose(pts[:, 1], 0.0, atol=1e-9)
+
+    assert xy.any() and xz.any()
+    assert np.all(xy | xz)
+    assert np.allclose((pts[xy, 0] + 0.5) ** 2 + pts[xy, 1] ** 2, 1.0, atol=1e-9)
+    assert np.allclose((pts[xz, 0] - 0.5) ** 2 + pts[xz, 2] ** 2, 1.0, atol=1e-9)
+    assert (
+        np.linalg.norm(pts[xy, None, :] - pts[None, xz, :], axis=2).min()
+        >= 1.0 - 1e-9
+    )
+
+
 def test_betti_numbers_are_ground_truth():
     expected = {
         "circle": (1, 1, 0),
         "two_circles": (2, 2, 0),
+        "entangled_circles": (2, 2, 0),
         "figure_eight": (1, 2, 0),
         "disk": (1, 0, 0),
         "annulus": (1, 1, 0),
