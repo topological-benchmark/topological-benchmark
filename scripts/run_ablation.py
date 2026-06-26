@@ -207,11 +207,35 @@ def _run_id(cfg: dict[str, Any]) -> str:
     return "|".join(parts)
 
 
-def _completed(path: Path) -> set[str]:
+def _expected_methods(cfg: dict[str, Any]) -> set[str]:
+    methods = {"pointnet", "pointnet++", "gudhi_cech"}
+    if cfg["run_cubical"]:
+        methods.add("gudhi_cubical")
+    if cfg["run_rips"]:
+        methods.update({"gudhi_rips", "ripser_learned", "ripser_direct"})
+    return methods
+
+
+def _check_header(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    with path.open(newline="") as f:
+        header = next(csv.reader(f), [])
+    if header != FIELDNAMES:
+        raise ValueError(f"CSV header mismatch in {path}; use a new --out path")
+
+
+def _completed(path: Path, configs: list[dict[str, Any]]) -> set[str]:
     if not path.exists():
         return set()
+    expected = {_run_id(cfg): _expected_methods(cfg) for cfg in configs}
+    seen: dict[str, set[str]] = {run_id: set() for run_id in expected}
     with path.open(newline="") as f:
-        return {row["run_id"] for row in csv.DictReader(f) if row.get("status") == "ok"}
+        for row in csv.DictReader(f):
+            run_id = row.get("run_id", "")
+            if row.get("status") == "ok" and run_id in seen:
+                seen[run_id].add(row.get("method", ""))
+    return {run_id for run_id, methods in seen.items() if methods >= expected[run_id]}
 
 
 def _row(run_id: str, cfg: dict[str, Any], method: str, wall: float, status: str, error: str = ""):
@@ -249,11 +273,7 @@ def _metric_rows(run_id: str, cfg: dict[str, Any], results: dict[str, dict], wal
 def _append_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     exists = path.exists() and path.stat().st_size > 0
-    if exists:
-        with path.open(newline="") as f:
-            header = next(csv.reader(f), [])
-        if header != FIELDNAMES:
-            raise ValueError(f"CSV header mismatch in {path}; use a new --out path")
+    _check_header(path)
     with path.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         if not exists:
@@ -263,7 +283,6 @@ def _append_rows(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def run(args: argparse.Namespace) -> None:
     out = args.out or Path(f"outputs/ablation_{datetime.now():%Y%m%d_%H%M%S}.csv")
-    done = _completed(out)
     configs = []
     seen = set()
     for cfg in (_effective_cfg(c, args) for c in _configs(args.stage)):
@@ -273,6 +292,8 @@ def run(args: argparse.Namespace) -> None:
             configs.append(cfg)
     if args.limit is not None:
         configs = configs[: args.limit]
+    _check_header(out)
+    done = _completed(out, configs)
     total = len(configs)
     print(f"writing {out}")
     print(f"configs {total}; already complete {sum(_run_id(c) in done for c in configs)}")

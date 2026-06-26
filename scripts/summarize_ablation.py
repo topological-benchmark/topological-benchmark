@@ -19,7 +19,12 @@ GROUPS = [
     "field_length_scale",
     "image_resolution",
     "image_backend",
+    "image_min_pixels_per_bandwidth",
     "representation",
+    "run_rips",
+    "run_cubical",
+    "epochs",
+    "val_frac",
 ]
 
 
@@ -34,6 +39,25 @@ def _mean(values: list[float]) -> float:
 def _rows(path: Path) -> list[dict[str, str]]:
     with path.open(newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _latest(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    latest_ok_index: dict[str, int] = {}
+    latest_ok: dict[tuple[str, str], dict[str, str]] = {}
+    latest_error: dict[str, tuple[int, dict[str, str]]] = {}
+    for i, row in enumerate(rows):
+        run_id = row["run_id"]
+        if row["status"] == "ok":
+            latest_ok_index[run_id] = i
+            latest_ok[(run_id, row["method"])] = row
+        else:
+            latest_error[run_id] = (i, row)
+
+    out = list(latest_ok.values())
+    for run_id, (i, row) in latest_error.items():
+        if i > latest_ok_index.get(run_id, -1):
+            out.append(row)
+    return out
 
 
 def _table(headers: list[str], rows: list[list[str]]) -> str:
@@ -64,14 +88,16 @@ def _summary(rows: list[dict[str, str]], group: str) -> str:
 
 
 def summarize(csv_path: Path) -> str:
-    rows = _rows(csv_path)
+    raw_rows = _rows(csv_path)
+    rows = _latest(raw_rows)
     ok = [r for r in rows if r["status"] == "ok"]
     errors = [r for r in rows if r["status"] != "ok"]
     configs = {r["run_id"] for r in rows}
     lines = [
         f"# Ablation Summary: `{csv_path}`",
         "",
-        f"- rows: {len(rows)}",
+        f"- rows: {len(raw_rows)}",
+        f"- latest rows: {len(rows)}",
         f"- ok rows: {len(ok)}",
         f"- error rows: {len(errors)}",
         f"- configs seen: {len(configs)}",
